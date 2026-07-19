@@ -50,4 +50,8 @@ async fn main() {
             let _ = out.flush().await;
         }));
     }
+    // stdin closed: let the last prediction finish before exiting.
+    if let Some(task) = in_flight {
+        let _ = task.await;
+    }
 }
