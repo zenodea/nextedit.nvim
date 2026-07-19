@@ -1,0 +1,168 @@
+use anyhow::{bail, Context, Result};
+use serde::Deserialize;
+use serde_json::json;
+
+use crate::protocol::{PredictParams, Prediction};
+
+const API_URL: &str = "https://api.anthropic.com/v1/messages";
+const DEFAULT_MODEL: &str = "claude-haiku-4-5";
+
+const SYSTEM_PROMPT: &str = "\
+You are a next-edit prediction engine embedded in a code editor.
+
+From the user's recent edits and the current buffer excerpt, predict the single \
+edit they are most likely to make next — the natural continuation of what they \
+are doing: finishing the line they are typing, applying the change they just \
+made to a similar spot, or fixing an inconsistency their last edit introduced.
+
+Rules:
+- The edit replaces whole lines start_line..end_line (absolute numbers as shown \
+in the excerpt, inclusive).
+- replacement is the complete new text for that range. To insert new lines after \
+line N without changing it, use start_line = end_line = N and include line N's \
+current text in the replacement.
+- Prefer one small, high-confidence edit at or near the cursor. Do not rewrite \
+code the user has not touched.
+- Match the file's existing style exactly (indentation, naming, quoting).
+- If you have no confident prediction, set has_edit to false. A wrong prediction \
+is worse than none.";
+
+pub struct Anthropic {
+    client: reqwest::Client,
+    api_key: String,
+    model: String,
+}
+
+/// What we ask the model to produce, enforced by structured outputs.
+#[derive(Deserialize)]
+struct ModelEdit {
+    has_edit: bool,
+    start_line: usize,
+    end_line: usize,
+    replacement: String,
+}
+
+impl Anthropic {
+    pub fn from_env() -> Result<Self> {
+        let api_key = std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY is not set")?;
+        let model = std::env::var("NEXTEDIT_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into());
+        Ok(Self { client: reqwest::Client::new(), api_key, model })
+    }
+
+    pub async fn predict(&self, p: &PredictParams) -> Result<Prediction> {
+        let body = json!({
+            "model": self.model,
+            "max_tokens": 1024,
+            "system": SYSTEM_PROMPT,
+            "messages": [{ "role": "user", "content": user_prompt(p) }],
+            "output_config": { "format": { "type": "json_schema", "schema": edit_schema() } },
+        });
+        let resp = self
+            .client
+            .post(API_URL)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&body)
+            .send()
+            .await
+            .context("request to Anthropic failed")?;
+        let status = resp.status();
+        let text = resp.text().await.context("reading Anthropic response failed")?;
+        if !status.is_success() {
+            bail!("Anthropic API returned {status}: {text}");
+        }
+
+        #[derive(Deserialize)]
+        struct ApiResponse {
+            content: Vec<ContentBlock>,
+        }
+        #[derive(Deserialize)]
+        struct ContentBlock {
+            #[serde(rename = "type")]
+            kind: String,
+            #[serde(default)]
+            text: String,
+        }
+
+        let api: ApiResponse =
+            serde_json::from_str(&text).context("unexpected API response shape")?;
+        let json_text = api
+            .content
+            .iter()
+            .find(|b| b.kind == "text")
+            .map(|b| b.text.as_str())
+            .context("no text block in API response")?;
+        let edit: ModelEdit =
+            serde_json::from_str(json_text).context("model output did not match schema")?;
+        Ok(validate(edit, p))
+    }
+}
+
+fn user_prompt(p: &PredictParams) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+    let _ = writeln!(s, "File: {} (filetype: {})\n", p.path, p.filetype);
+    s.push_str("Recent edits, oldest first:\n");
+    if p.recent_edits.is_empty() {
+        s.push_str("(none)\n");
+    }
+    for d in &p.recent_edits {
+        let _ = writeln!(s, "```diff\n{}\n```", d.trim_end());
+    }
+    let _ = writeln!(s, "\nBuffer excerpt ('>' marks the cursor line, {}):", p.cursor_line);
+    for (i, line) in p.excerpt_lines.iter().enumerate() {
+        let n = p.excerpt_start + i;
+        let marker = if n == p.cursor_line { '>' } else { ' ' };
+        let _ = writeln!(s, "{marker}{n:5}| {line}");
+    }
+    s.push_str("\nPredict the user's next edit.");
+    s
+}
+
+fn edit_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "has_edit": {
+                "type": "boolean",
+                "description": "false when there is no confident prediction"
+            },
+            "start_line": {
+                "type": "integer",
+                "description": "first buffer line to replace (absolute, inclusive)"
+            },
+            "end_line": {
+                "type": "integer",
+                "description": "last buffer line to replace (absolute, inclusive)"
+            },
+            "replacement": {
+                "type": "string",
+                "description": "full new text for the replaced lines, newline-separated; empty string deletes the lines"
+            }
+        },
+        "required": ["has_edit", "start_line", "end_line", "replacement"],
+        "additionalProperties": false
+    })
+}
+
+/// Clamp the model's edit to the excerpt and drop no-ops.
+fn validate(edit: ModelEdit, p: &PredictParams) -> Prediction {
+    if !edit.has_edit {
+        return Prediction::none();
+    }
+    let first = p.excerpt_start;
+    let last = p.excerpt_start + p.excerpt_lines.len().saturating_sub(1);
+    if edit.start_line < first || edit.end_line > last || edit.start_line > edit.end_line {
+        return Prediction::none();
+    }
+    let replacement: Vec<String> = if edit.replacement.is_empty() {
+        vec![]
+    } else {
+        edit.replacement.split('\n').map(str::to_string).collect()
+    };
+    let current = &p.excerpt_lines[edit.start_line - first..=edit.end_line - first];
+    if current == replacement.as_slice() {
+        return Prediction::none();
+    }
+    Prediction { has_edit: true, start_line: edit.start_line, end_line: edit.end_line, replacement }
+}
