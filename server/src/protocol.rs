@@ -1,0 +1,46 @@
+use serde::{Deserialize, Serialize};
+
+/// One JSON object per line on stdin.
+#[derive(Deserialize)]
+pub struct Request {
+    pub id: u64,
+    pub params: PredictParams,
+}
+
+#[derive(Deserialize)]
+pub struct PredictParams {
+    pub path: String,
+    pub filetype: String,
+    /// 1-indexed cursor line in the buffer.
+    pub cursor_line: usize,
+    /// Absolute 1-indexed line number of `excerpt_lines[0]`.
+    pub excerpt_start: usize,
+    pub excerpt_lines: Vec<String>,
+    /// Unified diffs of the user's recent edits, oldest first.
+    pub recent_edits: Vec<String>,
+}
+
+/// One JSON object per line on stdout.
+#[derive(Serialize)]
+pub struct Response {
+    pub id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Prediction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct Prediction {
+    pub has_edit: bool,
+    /// Absolute 1-indexed range of lines to replace, inclusive.
+    pub start_line: usize,
+    pub end_line: usize,
+    pub replacement: Vec<String>,
+}
+
+impl Prediction {
+    pub fn none() -> Self {
+        Prediction { has_edit: false, start_line: 0, end_line: 0, replacement: vec![] }
+    }
+}
