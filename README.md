@@ -27,8 +27,14 @@ changes become Tab, Tab, Tab.
 - Debounced, cancellable requests: a new keystroke aborts the in-flight
   prediction, and stale responses are dropped by id and changedtick
 - Rust sidecar server keeps all network and JSON work off the editor loop
-- Anthropic backend (Claude Haiku 4.5 by default) with structured outputs, so
-  the model reply is schema-validated JSON, never free text to parse
+- Multiple providers:
+  - **Anthropic** (default, Claude Haiku 4.5) with structured outputs, so the
+    model reply is schema-validated JSON, never free text to parse
+  - **OpenAI-compatible** chat endpoints: OpenAI, **Mercury** (Inception Labs'
+    diffusion coder, very low latency), **Ollama**, llama.cpp, vLLM, OpenRouter
+  - **Zeta**: Zed's open edit-prediction models, self-hosted behind any
+    OpenAI-compatible completions endpoint, using Zeta's native
+    editable-region rewrite format instead of JSON
 - Server-side validation: out-of-range and no-op edits are discarded before
   they reach the editor
 
@@ -37,8 +43,7 @@ changes become Tab, Tab, Tab.
 - Multi-location jumps: predict a follow-up edit elsewhere in the file with a
   Tab-to-jump hint, like Cursor
 - Inline ghost text for pure insertions instead of the line-based overlay
-- More providers behind the same trait: local models via an OpenAI-compatible
-  endpoint (llama.cpp, Ollama, Zeta 2), Copilot NES
+- Copilot NES as a provider
 - Prompt caching and streaming for lower latency
 - Partial accept (word or line at a time)
 - Incremental edit tracking instead of whole-buffer snapshots
@@ -56,11 +61,11 @@ changes become Tab, Tab, Tab.
 +-----------------------------+------------------------------+
 |  nextedit-server (Rust)                                    |
 |  main.rs      request loop, cancels superseded requests    |
-|  provider.rs  prompt building + Anthropic Messages API     |
+|  provider/    anthropic | openai-compatible | zeta         |
 |  protocol.rs  request/response types                       |
 +-----------------------------+------------------------------+
                               | HTTPS
-                        Anthropic API (claude-haiku-4-5)
+        Anthropic / OpenAI / Mercury / Ollama / Zeta model
 ```
 
 Why the split? The Lua side must never block the editor, and the
@@ -71,7 +76,8 @@ much nicer on tokio than on Neovim's event loop.
 
 - Neovim 0.10+
 - Rust toolchain (to build the server)
-- `ANTHROPIC_API_KEY` in the environment Neovim starts from
+- An API key for your chosen provider in the environment Neovim starts from
+  (`ANTHROPIC_API_KEY` for the default provider), or a local model server
 
 ## Install
 
@@ -114,13 +120,46 @@ require("nextedit").setup({
   accept_key = "<Tab>",
   dismiss_key = "<C-]>",
   server_cmd = nil,      -- override the server binary, e.g. { "/path/to/nextedit-server" }
+  provider = nil,        -- "anthropic" (default), "openai", "mercury", "ollama" or "zeta"
+  model = nil,           -- provider-specific model name
+  api_url = nil,         -- override the provider's endpoint
+  api_key = nil,         -- prefer the provider's env var; for keyless local setups
 })
 ```
 
-Environment variables read by the server:
+### Providers
 
-- `ANTHROPIC_API_KEY` (required)
-- `NEXTEDIT_MODEL` (default `claude-haiku-4-5`)
+| provider    | endpoint (default)                | default model      | API key env        |
+| ----------- | --------------------------------- | ------------------ | ------------------ |
+| `anthropic` | api.anthropic.com                 | `claude-haiku-4-5` | `ANTHROPIC_API_KEY`|
+| `openai`    | api.openai.com/v1                 | `gpt-5-mini`       | `OPENAI_API_KEY`   |
+| `mercury`   | api.inceptionlabs.ai/v1           | `mercury-coder`    | `INCEPTION_API_KEY`|
+| `ollama`    | localhost:11434/v1                | `qwen2.5-coder:7b` | none               |
+| `zeta`      | localhost:11434/v1                | `zeta`             | none               |
+
+`openai` works with any OpenAI-compatible chat completions server — point
+`api_url` at llama.cpp, vLLM, OpenRouter, Groq, etc. `zeta` speaks Zed's
+editable-region rewrite format over a raw completions endpoint and expects a
+[Zeta model](https://huggingface.co/zed-industries) served locally.
+
+Examples:
+
+```lua
+-- Mercury (diffusion model, ~1000 tok/s, well suited to edit prediction)
+require("nextedit").setup({ provider = "mercury" })
+
+-- Local model via Ollama
+require("nextedit").setup({ provider = "ollama", model = "qwen2.5-coder:7b" })
+
+-- Zeta served by llama.cpp
+require("nextedit").setup({ provider = "zeta", api_url = "http://localhost:8080/v1" })
+```
+
+The same settings are also read from the environment (which the Lua options
+override per key):
+
+- `NEXTEDIT_PROVIDER`, `NEXTEDIT_MODEL`, `NEXTEDIT_API_URL`, `NEXTEDIT_API_KEY`
+- provider key fallbacks: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `INCEPTION_API_KEY`
 
 Highlights: `NextEditOld` links to `DiffDelete`, `NextEditNew` to `DiffAdd`.
 Override either with `:hi` or `nvim_set_hl`.
@@ -134,9 +173,9 @@ Override either with `:hi` or `nvim_set_hl`.
 3. The excerpt around the cursor, the cursor line, and the edit history go to
    the Rust server. A new request aborts any in-flight one; the Lua side also
    drops responses whose id or changedtick is stale.
-4. The server prompts Claude with structured outputs (a JSON schema for
-   `{has_edit, start_line, end_line, replacement}`), validates the edit against
-   the excerpt, and discards no-ops.
+4. The server prompts the configured provider — structured JSON for
+   Anthropic/OpenAI-style backends, an editable-region rewrite for Zeta —
+   validates the edit against the excerpt, and discards no-ops.
 5. `ui.lua` renders the edit as extmarks. `<Tab>` applies it with
    `nvim_buf_set_lines`, which fires `TextChanged`, so a follow-up prediction
    is requested automatically. That is what gives the Tab-Tab-Tab chaining
@@ -149,4 +188,4 @@ Override either with `:hi` or `nvim_set_hl`.
 - One prediction at a time, near the cursor, no multi-location jumps yet
 - Whole-buffer snapshot per prediction cycle; fine for normal files, wasteful
   for huge ones
-- No streaming, no caching, single provider
+- No streaming, no caching
