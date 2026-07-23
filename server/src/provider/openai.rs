@@ -1,10 +1,8 @@
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
-use serde_json::json;
 
 use crate::protocol::{PredictParams, Prediction};
 
-use super::{http_client, parse_model_edit, user_prompt, validate, SYSTEM_PROMPT};
+use super::{chat_body, http_client, parse_chat_content, parse_model_edit, validate};
 
 /// Any OpenAI-compatible chat completions endpoint: OpenAI itself, Mercury
 /// (Inception Labs), Ollama, llama.cpp, vLLM, OpenRouter, ...
@@ -14,14 +12,6 @@ pub struct OpenAi {
     api_key: Option<String>,
     model: String,
 }
-
-// The JSON instructions live in the prompt rather than response_format because
-// not every compatible server supports json_schema, and several reject unknown
-// response_format values outright.
-const FORMAT_INSTRUCTIONS: &str = "\n\nRespond with only a JSON object shaped as \
-{\"has_edit\": boolean, \"start_line\": integer, \"end_line\": integer, \"replacement\": string} \
-where replacement is the full new text for the replaced lines, newline-separated, \
-and an empty string deletes them. No prose, no code fences.";
 
 impl OpenAi {
     pub fn from_env(flavor: &str) -> Result<Self> {
@@ -44,16 +34,7 @@ impl OpenAi {
     }
 
     pub async fn predict(&self, p: &PredictParams) -> Result<Prediction> {
-        // Only universally supported fields: reasoning-model endpoints reject
-        // max_tokens and non-default temperature.
-        let body = json!({
-            "model": self.model,
-            "messages": [
-                { "role": "system", "content": format!("{SYSTEM_PROMPT}{FORMAT_INSTRUCTIONS}") },
-                { "role": "user", "content": user_prompt(p) },
-            ],
-        });
-        let mut req = self.client.post(&self.api_url).json(&body);
+        let mut req = self.client.post(&self.api_url).json(&chat_body(&self.model, p));
         if let Some(key) = &self.api_key {
             req = req.bearer_auth(key);
         }
@@ -63,28 +44,7 @@ impl OpenAi {
         if !status.is_success() {
             bail!("chat completions endpoint returned {status}: {text}");
         }
-
-        #[derive(Deserialize)]
-        struct ApiResponse {
-            choices: Vec<Choice>,
-        }
-        #[derive(Deserialize)]
-        struct Choice {
-            message: Message,
-        }
-        #[derive(Deserialize)]
-        struct Message {
-            #[serde(default)]
-            content: String,
-        }
-
-        let api: ApiResponse =
-            serde_json::from_str(&text).context("unexpected API response shape")?;
-        let content = api
-            .choices
-            .first()
-            .map(|c| c.message.content.as_str())
-            .context("no choices in API response")?;
-        Ok(validate(parse_model_edit(content)?, p))
+        let content = parse_chat_content(&text)?;
+        Ok(validate(parse_model_edit(&content)?, p))
     }
 }

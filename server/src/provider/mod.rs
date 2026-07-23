@@ -1,4 +1,5 @@
 mod anthropic;
+mod copilot;
 mod openai;
 mod zeta;
 
@@ -12,21 +13,23 @@ use crate::protocol::{PredictParams, Prediction};
 
 pub enum Provider {
     Anthropic(anthropic::Anthropic),
+    Copilot(copilot::Copilot),
     OpenAi(openai::OpenAi),
     Zeta(zeta::Zeta),
 }
 
 impl Provider {
-    /// Selected by NEXTEDIT_PROVIDER: anthropic (default), openai, mercury,
-    /// ollama or zeta.
+    /// Selected by NEXTEDIT_PROVIDER: anthropic (default), copilot, openai,
+    /// mercury, ollama or zeta.
     pub fn from_env() -> Result<Self> {
         let name = std::env::var("NEXTEDIT_PROVIDER").unwrap_or_else(|_| "anthropic".into());
         match name.as_str() {
             "anthropic" => Ok(Self::Anthropic(anthropic::Anthropic::from_env()?)),
+            "copilot" => Ok(Self::Copilot(copilot::Copilot::from_env()?)),
             "openai" | "mercury" | "ollama" => Ok(Self::OpenAi(openai::OpenAi::from_env(&name)?)),
             "zeta" => Ok(Self::Zeta(zeta::Zeta::from_env()?)),
             other => bail!(
-                "unknown NEXTEDIT_PROVIDER {other:?} (expected anthropic, openai, mercury, ollama or zeta)"
+                "unknown NEXTEDIT_PROVIDER {other:?} (expected anthropic, copilot, openai, mercury, ollama or zeta)"
             ),
         }
     }
@@ -34,6 +37,7 @@ impl Provider {
     pub async fn predict(&self, p: &PredictParams) -> Result<Prediction> {
         match self {
             Self::Anthropic(x) => x.predict(p).await,
+            Self::Copilot(x) => x.predict(p).await,
             Self::OpenAi(x) => x.predict(p).await,
             Self::Zeta(x) => x.predict(p).await,
         }
@@ -59,6 +63,47 @@ code the user has not touched.
 - Match the file's existing style exactly (indentation, naming, quoting).
 - If you have no confident prediction, set has_edit to false. A wrong prediction \
 is worse than none.";
+
+// The JSON instructions live in the prompt rather than response_format because
+// not every compatible server supports json_schema, and several reject unknown
+// response_format values outright.
+pub(crate) const FORMAT_INSTRUCTIONS: &str = "\n\nRespond with only a JSON object shaped as \
+{\"has_edit\": boolean, \"start_line\": integer, \"end_line\": integer, \"replacement\": string} \
+where replacement is the full new text for the replaced lines, newline-separated, \
+and an empty string deletes them. No prose, no code fences.";
+
+/// Request body for an OpenAI-style chat completions call. Only universally
+/// supported fields: reasoning-model endpoints reject max_tokens and
+/// non-default temperature.
+pub(crate) fn chat_body(model: &str, p: &PredictParams) -> serde_json::Value {
+    json!({
+        "model": model,
+        "messages": [
+            { "role": "system", "content": format!("{SYSTEM_PROMPT}{FORMAT_INSTRUCTIONS}") },
+            { "role": "user", "content": user_prompt(p) },
+        ],
+    })
+}
+
+/// Pull the assistant text out of an OpenAI-style chat completions response.
+pub(crate) fn parse_chat_content(text: &str) -> Result<String> {
+    #[derive(Deserialize)]
+    struct ApiResponse {
+        choices: Vec<Choice>,
+    }
+    #[derive(Deserialize)]
+    struct Choice {
+        message: Message,
+    }
+    #[derive(Deserialize)]
+    struct Message {
+        #[serde(default)]
+        content: String,
+    }
+    let api: ApiResponse = serde_json::from_str(text).context("unexpected API response shape")?;
+    let choice = api.choices.into_iter().next().context("no choices in API response")?;
+    Ok(choice.message.content)
+}
 
 /// What we ask the model to produce, enforced by structured outputs where the
 /// API supports them and by lenient parsing otherwise.
