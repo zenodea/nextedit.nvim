@@ -1,13 +1,41 @@
+mod anthropic;
+mod openai;
+
+use std::time::Duration;
+
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::protocol::{PredictParams, Prediction};
 
-const API_URL: &str = "https://api.anthropic.com/v1/messages";
-const DEFAULT_MODEL: &str = "claude-haiku-4-5";
+pub enum Provider {
+    Anthropic(anthropic::Anthropic),
+    OpenAi(openai::OpenAi),
+}
 
-const SYSTEM_PROMPT: &str = "\
+impl Provider {
+    /// Selected by NEXTEDIT_PROVIDER: anthropic (default), openai, mercury or ollama.
+    pub fn from_env() -> Result<Self> {
+        let name = std::env::var("NEXTEDIT_PROVIDER").unwrap_or_else(|_| "anthropic".into());
+        match name.as_str() {
+            "anthropic" => Ok(Self::Anthropic(anthropic::Anthropic::from_env()?)),
+            "openai" | "mercury" | "ollama" => Ok(Self::OpenAi(openai::OpenAi::from_env(&name)?)),
+            other => bail!(
+                "unknown NEXTEDIT_PROVIDER {other:?} (expected anthropic, openai, mercury or ollama)"
+            ),
+        }
+    }
+
+    pub async fn predict(&self, p: &PredictParams) -> Result<Prediction> {
+        match self {
+            Self::Anthropic(x) => x.predict(p).await,
+            Self::OpenAi(x) => x.predict(p).await,
+        }
+    }
+}
+
+pub(crate) const SYSTEM_PROMPT: &str = "\
 You are a next-edit prediction engine embedded in a code editor.
 
 From the user's recent edits and the current buffer excerpt, predict the single \
@@ -27,78 +55,25 @@ code the user has not touched.
 - If you have no confident prediction, set has_edit to false. A wrong prediction \
 is worse than none.";
 
-pub struct Anthropic {
-    client: reqwest::Client,
-    api_key: String,
-    model: String,
-}
-
-/// What we ask the model to produce, enforced by structured outputs.
+/// What we ask the model to produce, enforced by structured outputs where the
+/// API supports them and by lenient parsing otherwise.
 #[derive(Deserialize)]
-struct ModelEdit {
-    has_edit: bool,
-    start_line: usize,
-    end_line: usize,
-    replacement: String,
+pub(crate) struct ModelEdit {
+    pub has_edit: bool,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub replacement: String,
 }
 
-impl Anthropic {
-    pub fn from_env() -> Result<Self> {
-        let api_key = std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY is not set")?;
-        let model = std::env::var("NEXTEDIT_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into());
-        Ok(Self { client: reqwest::Client::new(), api_key, model })
-    }
-
-    pub async fn predict(&self, p: &PredictParams) -> Result<Prediction> {
-        let body = json!({
-            "model": self.model,
-            "max_tokens": 1024,
-            "system": SYSTEM_PROMPT,
-            "messages": [{ "role": "user", "content": user_prompt(p) }],
-            "output_config": { "format": { "type": "json_schema", "schema": edit_schema() } },
-        });
-        let resp = self
-            .client
-            .post(API_URL)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .json(&body)
-            .send()
-            .await
-            .context("request to Anthropic failed")?;
-        let status = resp.status();
-        let text = resp.text().await.context("reading Anthropic response failed")?;
-        if !status.is_success() {
-            bail!("Anthropic API returned {status}: {text}");
-        }
-
-        #[derive(Deserialize)]
-        struct ApiResponse {
-            content: Vec<ContentBlock>,
-        }
-        #[derive(Deserialize)]
-        struct ContentBlock {
-            #[serde(rename = "type")]
-            kind: String,
-            #[serde(default)]
-            text: String,
-        }
-
-        let api: ApiResponse =
-            serde_json::from_str(&text).context("unexpected API response shape")?;
-        let json_text = api
-            .content
-            .iter()
-            .find(|b| b.kind == "text")
-            .map(|b| b.text.as_str())
-            .context("no text block in API response")?;
-        let edit: ModelEdit =
-            serde_json::from_str(json_text).context("model output did not match schema")?;
-        Ok(validate(edit, p))
-    }
+pub(crate) fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(20))
+        .build()
+        .expect("client builds")
 }
 
-fn user_prompt(p: &PredictParams) -> String {
+pub(crate) fn user_prompt(p: &PredictParams) -> String {
     use std::fmt::Write;
     let mut s = String::new();
     let _ = writeln!(s, "File: {} (filetype: {})\n", p.path, p.filetype);
@@ -119,7 +94,7 @@ fn user_prompt(p: &PredictParams) -> String {
     s
 }
 
-fn edit_schema() -> serde_json::Value {
+pub(crate) fn edit_schema() -> serde_json::Value {
     json!({
         "type": "object",
         "properties": {
@@ -145,8 +120,24 @@ fn edit_schema() -> serde_json::Value {
     })
 }
 
+/// Parse a ModelEdit from model text that may be wrapped in code fences or prose.
+pub(crate) fn parse_model_edit(text: &str) -> Result<ModelEdit> {
+    if let Ok(edit) = serde_json::from_str(text) {
+        return Ok(edit);
+    }
+    let start = text.find('{');
+    let end = text.rfind('}');
+    if let (Some(start), Some(end)) = (start, end) {
+        if start < end {
+            return serde_json::from_str(&text[start..=end])
+                .context("model output did not match the edit schema");
+        }
+    }
+    bail!("model output contained no JSON object")
+}
+
 /// Clamp the model's edit to the excerpt and drop no-ops.
-fn validate(edit: ModelEdit, p: &PredictParams) -> Prediction {
+pub(crate) fn validate(edit: ModelEdit, p: &PredictParams) -> Prediction {
     if !edit.has_edit {
         return Prediction::none();
     }
