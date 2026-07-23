@@ -10,6 +10,10 @@ local defaults = {
   accept_key = "<Tab>",
   dismiss_key = "<C-]>",
   server_cmd = nil, -- defaults to the bundled Rust binary
+  provider = nil, -- "anthropic" (default), "openai", "mercury", "ollama" or "zeta"
+  model = nil, -- provider-specific model name
+  api_url = nil, -- override the provider's endpoint, e.g. a local llama.cpp server
+  api_key = nil, -- prefer the provider's env var; set this only for keyless local setups
 }
 
 local opts
@@ -19,6 +23,15 @@ local latest_id = 0
 local function plugin_root()
   local source = debug.getinfo(1, "S").source:sub(2)
   return vim.fn.fnamemodify(source, ":h:h:h")
+end
+
+local function server_env()
+  return {
+    NEXTEDIT_PROVIDER = opts.provider,
+    NEXTEDIT_MODEL = opts.model,
+    NEXTEDIT_API_URL = opts.api_url,
+    NEXTEDIT_API_KEY = opts.api_key,
+  }
 end
 
 local function default_server_cmd()
@@ -80,7 +93,7 @@ function M.setup(user_opts)
   vim.api.nvim_set_hl(0, "NextEditOld", { default = true, link = "DiffDelete" })
   vim.api.nvim_set_hl(0, "NextEditNew", { default = true, link = "DiffAdd" })
 
-  if not server.start(opts.server_cmd or default_server_cmd()) then
+  if not server.start(opts.server_cmd or default_server_cmd(), server_env()) then
     return
   end
 
@@ -117,7 +130,7 @@ function M.setup(user_opts)
   vim.api.nvim_create_user_command("NextEdit", request_prediction, { desc = "Request a prediction now" })
   vim.api.nvim_create_user_command("NextEditRestart", function()
     server.stop()
-    server.start(opts.server_cmd or default_server_cmd())
+    server.start(opts.server_cmd or default_server_cmd(), server_env())
   end, { desc = "Restart the nextedit server" })
 end
 
