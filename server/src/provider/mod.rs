@@ -1,5 +1,6 @@
 mod anthropic;
 mod openai;
+mod zeta;
 
 use std::time::Duration;
 
@@ -12,17 +13,20 @@ use crate::protocol::{PredictParams, Prediction};
 pub enum Provider {
     Anthropic(anthropic::Anthropic),
     OpenAi(openai::OpenAi),
+    Zeta(zeta::Zeta),
 }
 
 impl Provider {
-    /// Selected by NEXTEDIT_PROVIDER: anthropic (default), openai, mercury or ollama.
+    /// Selected by NEXTEDIT_PROVIDER: anthropic (default), openai, mercury,
+    /// ollama or zeta.
     pub fn from_env() -> Result<Self> {
         let name = std::env::var("NEXTEDIT_PROVIDER").unwrap_or_else(|_| "anthropic".into());
         match name.as_str() {
             "anthropic" => Ok(Self::Anthropic(anthropic::Anthropic::from_env()?)),
             "openai" | "mercury" | "ollama" => Ok(Self::OpenAi(openai::OpenAi::from_env(&name)?)),
+            "zeta" => Ok(Self::Zeta(zeta::Zeta::from_env()?)),
             other => bail!(
-                "unknown NEXTEDIT_PROVIDER {other:?} (expected anthropic, openai, mercury or ollama)"
+                "unknown NEXTEDIT_PROVIDER {other:?} (expected anthropic, openai, mercury, ollama or zeta)"
             ),
         }
     }
@@ -31,6 +35,7 @@ impl Provider {
         match self {
             Self::Anthropic(x) => x.predict(p).await,
             Self::OpenAi(x) => x.predict(p).await,
+            Self::Zeta(x) => x.predict(p).await,
         }
     }
 }
