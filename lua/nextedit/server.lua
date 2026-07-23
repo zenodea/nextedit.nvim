@@ -22,7 +22,9 @@ local function on_stdout(_, data)
   end
 end
 
-function M.start(cmd)
+--- env is an optional table of environment variables merged into the server's
+--- environment (e.g. { NEXTEDIT_PROVIDER = "ollama" }).
+function M.start(cmd, env)
   if job then
     return true
   end
@@ -34,6 +36,7 @@ function M.start(cmd)
     return false
   end
   job = vim.fn.jobstart(cmd, {
+    env = env and not vim.tbl_isempty(env) and env or nil,
     on_stdout = on_stdout,
     on_stderr = function(_, data)
       local msg = table.concat(data, "\n"):gsub("%s+$", "")
