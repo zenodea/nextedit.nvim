@@ -7,11 +7,11 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 
 use protocol::{Request, Response};
-use provider::Anthropic;
+use provider::Provider;
 
 #[tokio::main]
 async fn main() {
-    let provider = Arc::new(match Anthropic::from_env() {
+    let provider = Arc::new(match Provider::from_env() {
         Ok(p) => p,
         Err(e) => {
             eprintln!("nextedit-server: {e}");
