@@ -16,7 +16,7 @@ pub struct OpenAi {
 impl OpenAi {
     pub fn from_env(flavor: &str) -> Result<Self> {
         let (default_url, key_var, default_model) = match flavor {
-            "mercury" => ("https://api.inceptionlabs.ai/v1", "INCEPTION_API_KEY", "mercury-coder"),
+            "mercury" => ("https://api.inceptionlabs.ai/v1", "INCEPTION_API_KEY", "mercury-2"),
             "ollama" => ("http://localhost:11434/v1", "", "qwen2.5-coder:7b"),
             _ => ("https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-5-mini"),
         };
