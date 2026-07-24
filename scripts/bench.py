@@ -128,7 +128,7 @@ def main():
               f"mean {statistics.mean(ms):.0f} ms | max {max(ms):.0f} ms")
         if len(ms) > 1:
             print(f"first (cold) {ms[0]:.0f} ms | rest mean {statistics.mean(ms[1:]):.0f} ms")
-        print("note: perceived latency in nvim = this + debounce_ms (default 300)")
+        print("note: perceived latency in nvim = this + debounce_ms (default 150)")
 
 
 if __name__ == "__main__":
