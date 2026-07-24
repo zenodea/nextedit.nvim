@@ -22,8 +22,9 @@ automatically, so repetitive changes become Tab, Tab, Tab.
 - **Diff overlay rendering**: lines that would change are highlighted,
   proposed lines appear below; `<Tab>` accepts, `<C-]>` dismisses
 - **Fast and non-blocking**: a Rust sidecar keeps HTTP and JSON off the
-  editor loop; requests are debounced, in-flight predictions are aborted by
-  new keystrokes, and stale responses are dropped by id and changedtick
+  editor loop; requests are debounced, and predictions that finish after
+  you kept typing are shifted to their new position — they are only
+  dropped when your edits touched the predicted lines themselves
 - **Validated output**: model replies are schema-checked, clamped to the
   excerpt, and no-op edits are discarded before they reach the editor
 
