@@ -86,6 +86,9 @@ Notes:
   particularly good latency fit for edit prediction.
 - **openai** works with any OpenAI-compatible chat completions server —
   point `api_url` at llama.cpp, vLLM, OpenRouter, Groq, LM Studio, etc.
+  Requests include [predicted outputs](https://platform.openai.com/docs/guides/predicted-outputs)
+  seeded with the code around the cursor, which speeds up decoding on models
+  that support them; servers that reject the field are retried without it.
 - **zeta** speaks the native editable-region rewrite format of
   [Zed's Zeta models](https://huggingface.co/zed-industries) over a raw
   completions endpoint — serve one locally with Ollama, llama.cpp or vLLM.
