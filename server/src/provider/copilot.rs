@@ -43,7 +43,13 @@ impl Copilot {
             )?;
         let api_url = std::env::var("NEXTEDIT_API_URL").unwrap_or_else(|_| DEFAULT_API_URL.into());
         let model = std::env::var("NEXTEDIT_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into());
-        Ok(Self { client: http_client(), api_url, oauth_token, model, session: Mutex::new(None) })
+        Ok(Self {
+            client: http_client(),
+            api_url,
+            oauth_token,
+            model,
+            session: Mutex::new(None),
+        })
     }
 
     /// The cached session token, refreshed via the OAuth token when stale.
@@ -72,14 +78,20 @@ impl Copilot {
             .await
             .context("Copilot token exchange failed")?;
         let status = resp.status();
-        let text = resp.text().await.context("reading Copilot token response failed")?;
+        let text = resp
+            .text()
+            .await
+            .context("reading Copilot token response failed")?;
         if !status.is_success() {
             bail!("Copilot token exchange returned {status}: {text}");
         }
         let tr: TokenResponse =
             serde_json::from_str(&text).context("unexpected Copilot token response shape")?;
         let token = tr.token.clone();
-        *session = Some(Session { token: tr.token, expires_at: tr.expires_at });
+        *session = Some(Session {
+            token: tr.token,
+            expires_at: tr.expires_at,
+        });
         Ok(token)
     }
 
@@ -98,7 +110,10 @@ impl Copilot {
             .await
             .context("request to Copilot failed")?;
         let status = resp.status();
-        let text = resp.text().await.context("reading Copilot response failed")?;
+        let text = resp
+            .text()
+            .await
+            .context("reading Copilot response failed")?;
         if !status.is_success() {
             bail!("Copilot API returned {status}: {text}");
         }
@@ -111,16 +126,25 @@ const EDITOR_VERSION: &str = "Neovim/0.10.0";
 const PLUGIN_VERSION: &str = "nextedit.nvim/0.1.0";
 
 fn unix_now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// The OAuth token that copilot.lua / copilot.vim / VS Code store after sign-in.
 fn oauth_token_from_config() -> Option<String> {
     let dir = config_dir()?.join("github-copilot");
     for file in ["apps.json", "hosts.json"] {
-        let Ok(text) = std::fs::read_to_string(dir.join(file)) else { continue };
-        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
-        let Some(entries) = json.as_object() else { continue };
+        let Ok(text) = std::fs::read_to_string(dir.join(file)) else {
+            continue;
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let Some(entries) = json.as_object() else {
+            continue;
+        };
         for (host, entry) in entries {
             if host.contains("github.com") {
                 if let Some(token) = entry.get("oauth_token").and_then(|t| t.as_str()) {
@@ -138,5 +162,7 @@ fn config_dir() -> Option<PathBuf> {
             return Some(PathBuf::from(xdg));
         }
     }
-    std::env::var("HOME").ok().map(|home| PathBuf::from(home).join(".config"))
+    std::env::var("HOME")
+        .ok()
+        .map(|home| PathBuf::from(home).join(".config"))
 }
