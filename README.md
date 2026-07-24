@@ -63,6 +63,7 @@ show underneath (`NextEditNew`).
 | `<C-]>`            | Dismiss the prediction                   |
 | `:NextEdit`        | Request a prediction now                 |
 | `:NextEditRestart` | Restart the server process               |
+| `:checkhealth nextedit` | Diagnose binary, server and credential problems |
 
 ## Providers
 
