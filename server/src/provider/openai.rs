@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use serde_json::json;
 
 use crate::protocol::{PredictParams, Prediction};
 
@@ -11,6 +12,7 @@ pub struct OpenAi {
     api_url: String,
     api_key: Option<String>,
     model: String,
+    predicted_outputs: bool,
 }
 
 impl OpenAi {
@@ -30,21 +32,63 @@ impl OpenAi {
             bail!("no API key: set NEXTEDIT_API_KEY (or {key_var}) for provider {flavor}");
         }
         let model = std::env::var("NEXTEDIT_MODEL").unwrap_or_else(|_| default_model.into());
-        Ok(Self { client: http_client(), api_url, api_key, model })
+        Ok(Self {
+            client: http_client(),
+            api_url,
+            api_key,
+            model,
+            predicted_outputs: flavor == "openai",
+        })
     }
 
-    pub async fn predict(&self, p: &PredictParams) -> Result<Prediction> {
-        let mut req = self.client.post(&self.api_url).json(&chat_body(&self.model, p));
+    async fn post(&self, body: &serde_json::Value) -> Result<(reqwest::StatusCode, String)> {
+        let mut req = self.client.post(&self.api_url).json(body);
         if let Some(key) = &self.api_key {
             req = req.bearer_auth(key);
         }
         let resp = req.send().await.context("request to chat completions endpoint failed")?;
         let status = resp.status();
         let text = resp.text().await.context("reading chat completions response failed")?;
+        Ok((status, text))
+    }
+
+    pub async fn predict(&self, p: &PredictParams) -> Result<Prediction> {
+        let mut body = chat_body(&self.model, p);
+        let predicted = self.predicted_outputs && add_prediction(&mut body, p);
+        let (mut status, mut text) = self.post(&body).await?;
+        // Not every model or compatible server accepts the prediction field
+        // (reasoning models reject it); retry the request without it.
+        if predicted && status == reqwest::StatusCode::BAD_REQUEST {
+            body.as_object_mut().map(|b| b.remove("prediction"));
+            (status, text) = self.post(&body).await?;
+        }
         if !status.is_success() {
             bail!("chat completions endpoint returned {status}: {text}");
         }
         let content = parse_chat_content(&text)?;
         Ok(validate(parse_model_edit(&content)?, p))
     }
+}
+
+/// Attach an OpenAI predicted-outputs guess: the reply is a JSON edit whose
+/// replacement mostly mirrors the lines near the cursor, so seeding it lets
+/// the server skip decoding the tokens that match. The window is kept small
+/// because rejected prediction tokens are billed at the completion rate.
+fn add_prediction(body: &mut serde_json::Value, p: &PredictParams) -> bool {
+    const WINDOW: usize = 8;
+    let first = p.excerpt_start;
+    let last = first + p.excerpt_lines.len().saturating_sub(1);
+    if p.excerpt_lines.is_empty() || p.cursor_line < first || p.cursor_line > last {
+        return false;
+    }
+    let start = p.cursor_line.saturating_sub(WINDOW).max(first);
+    let end = (p.cursor_line + WINDOW).min(last);
+    let guess = json!({
+        "has_edit": true,
+        "start_line": start,
+        "end_line": end,
+        "replacement": p.excerpt_lines[start - first..=end - first].join("\n"),
+    });
+    body["prediction"] = json!({ "type": "content", "content": guess.to_string() });
+    true
 }
