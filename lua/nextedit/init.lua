@@ -1,5 +1,6 @@
 local diff = require("nextedit.diff")
 local server = require("nextedit.server")
+local track = require("nextedit.track")
 local ui = require("nextedit.ui")
 
 local M = {}
@@ -18,7 +19,9 @@ local defaults = {
 
 local opts
 local timer = vim.uv.new_timer()
-local latest_id = 0
+local inflight = nil -- { buf, sent_at }
+local rerequest = false -- a request came in while one was in flight
+local INFLIGHT_TIMEOUT_MS = 10000
 
 local function plugin_root()
   local source = debug.getinfo(1, "S").source:sub(2)
@@ -45,40 +48,80 @@ local function default_server_cmd()
   return { target .. "release/nextedit-server" } -- let server.start report the error
 end
 
+--- The prediction targeted the excerpt as it was when the request was sent;
+--- shift it across the edits made since, and show it only if the lines it
+--- replaces are still exactly what the model saw.
+local function remap_and_show(buf, params, result)
+  local events = track.finish(buf)
+  if not vim.api.nvim_buf_is_valid(buf) or vim.api.nvim_get_current_buf() ~= buf then
+    return
+  end
+  local start_line, end_line = track.remap(result.start_line, result.end_line, events)
+  if not start_line then
+    return
+  end
+  local original = {}
+  for i = result.start_line, result.end_line do
+    original[#original + 1] = params.excerpt_lines[i - params.excerpt_start + 1]
+  end
+  local current = vim.api.nvim_buf_get_lines(buf, start_line - 1, end_line, false)
+  if not vim.deep_equal(current, original) then
+    return
+  end
+  ui.show(buf, {
+    start_line = start_line,
+    end_line = end_line,
+    replacement = result.replacement,
+  }, vim.b[buf].changedtick)
+end
+
 local function request_prediction()
   local buf = vim.api.nvim_get_current_buf()
   if not vim.api.nvim_buf_is_valid(buf) or vim.bo[buf].buftype ~= "" then
     return
   end
+  -- One request at a time: let the in-flight one finish (its response can be
+  -- remapped) and go again right after, instead of wasting the round trip.
+  if inflight then
+    if vim.uv.now() - inflight.sent_at < INFLIGHT_TIMEOUT_MS then
+      rerequest = true
+      return
+    end
+    inflight = nil -- response never came; assume the server lost it
+  end
   local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
   local first = math.max(1, cursor_line - opts.context_lines)
   local last = math.min(vim.api.nvim_buf_line_count(buf), cursor_line + opts.context_lines)
-  local tick = vim.b[buf].changedtick
-  local id
-  id = server.predict({
+  local params = {
     path = vim.api.nvim_buf_get_name(buf),
     filetype = vim.bo[buf].filetype,
     cursor_line = cursor_line,
     excerpt_start = first,
     excerpt_lines = vim.api.nvim_buf_get_lines(buf, first - 1, last, false),
     recent_edits = diff.take(buf),
-  }, function(result, err)
+  }
+  track.begin(buf)
+  local id = server.predict(params, function(result, err)
     vim.schedule(function()
+      inflight = nil
       if err then
+        track.finish(buf)
         vim.notify("nextedit: " .. err, vim.log.levels.WARN)
-        return
+      elseif result and result.has_edit then
+        remap_and_show(buf, params, result)
+      else
+        track.finish(buf)
       end
-      -- Drop stale responses: superseded by a newer request, or the buffer moved on.
-      if id ~= latest_id or not vim.api.nvim_buf_is_valid(buf) or vim.b[buf].changedtick ~= tick then
-        return
-      end
-      if result and result.has_edit then
-        ui.show(buf, result, tick)
+      if rerequest then
+        rerequest = false
+        request_prediction()
       end
     end)
   end)
   if id then
-    latest_id = id
+    inflight = { buf = buf, sent_at = vim.uv.now() }
+  else
+    track.finish(buf)
   end
 end
 
@@ -115,6 +158,7 @@ function M.setup(user_opts)
     group = group,
     callback = function(ev)
       diff.forget(ev.buf)
+      track.forget(ev.buf)
     end,
   })
 
