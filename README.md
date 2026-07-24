@@ -70,7 +70,7 @@ show underneath (`NextEditNew`).
 | `anthropic` | api.anthropic.com       | `claude-haiku-4-5` | `ANTHROPIC_API_KEY`              |
 | `copilot`   | api.githubcopilot.com   | `gpt-4.1`          | Copilot sign-in (see below)      |
 | `openai`    | api.openai.com/v1       | `gpt-5-mini`       | `OPENAI_API_KEY`                 |
-| `mercury`   | api.inceptionlabs.ai/v1 | `mercury-coder`    | `INCEPTION_API_KEY`              |
+| `mercury`   | api.inceptionlabs.ai/v1 | `mercury-2`        | `INCEPTION_API_KEY`              |
 | `ollama`    | localhost:11434/v1      | `qwen2.5-coder:7b` | none                             |
 | `zeta`      | localhost:11434/v1      | `zeta`             | none                             |
 
