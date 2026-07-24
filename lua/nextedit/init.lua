@@ -130,6 +130,15 @@ local function schedule_prediction()
   timer:start(opts.debounce_ms, 0, vim.schedule_wrap(request_prediction))
 end
 
+--- Introspection for :checkhealth; nil until setup() has run.
+function M.current_opts()
+  return opts
+end
+
+function M.server_command()
+  return (opts and opts.server_cmd) or default_server_cmd()
+end
+
 function M.setup(user_opts)
   opts = vim.tbl_deep_extend("force", defaults, user_opts or {})
 

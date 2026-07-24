@@ -71,6 +71,10 @@ function M.predict(params, cb)
   return next_id
 end
 
+function M.is_running()
+  return job ~= nil
+end
+
 function M.stop()
   if job then
     vim.fn.jobstop(job)
