@@ -6,7 +6,7 @@ local ui = require("nextedit.ui")
 local M = {}
 
 local defaults = {
-  debounce_ms = 300,
+  debounce_ms = 150,
   context_lines = 40, -- buffer context sent above and below the cursor
   accept_key = "<Tab>",
   dismiss_key = "<C-]>",

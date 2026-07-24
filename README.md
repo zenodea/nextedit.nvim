@@ -53,7 +53,7 @@ the repo to your runtimepath, and call `require("nextedit").setup()`.
 
 ## Usage
 
-Just type. After a short pause (300 ms default) a prediction may appear: the
+Just type. After a short pause (150 ms default) a prediction may appear: the
 lines it would replace are highlighted (`NextEditOld`), the proposed lines
 show underneath (`NextEditNew`).
 
@@ -100,7 +100,7 @@ Defaults shown:
 
 ```lua
 require("nextedit").setup({
-  debounce_ms = 300,     -- pause after typing before requesting a prediction
+  debounce_ms = 150,     -- pause after typing before requesting a prediction
   context_lines = 40,    -- buffer lines sent above and below the cursor
   accept_key = "<Tab>",
   dismiss_key = "<C-]>",
