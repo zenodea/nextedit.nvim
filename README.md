@@ -75,6 +75,7 @@ show underneath (`NextEditNew`).
 | `mercury`   | api.inceptionlabs.ai/v1 | `mercury-2`        | `INCEPTION_API_KEY`              |
 | `ollama`    | localhost:11434/v1      | `qwen2.5-coder:7b` | none                             |
 | `zeta`      | localhost:11434/v1      | `zeta`             | none                             |
+| `zeta2`     | localhost:11434/v1      | `zeta2`            | none                             |
 
 Notes:
 
@@ -85,7 +86,12 @@ Notes:
   sign in once with `:Copilot auth` and it works with your existing Copilot
   subscription. Any model available to Copilot chat can be set via `model`.
 - **mercury** is Inception Labs' diffusion coder; at ~1000 tok/s it is a
-  particularly good latency fit for edit prediction.
+  particularly good latency fit for edit prediction. `mercury-2` is a reasoning
+  model, so requests ask for `reasoning_effort: instant` — left at the default
+  it spends several hundred tokens thinking before emitting the edit, which
+  dominates the round trip (~2.9s median vs ~0.4s measured). Override with
+  `NEXTEDIT_REASONING_EFFORT` (`instant`, `low`, `medium`, `high`) if you want
+  to trade latency back for prediction quality.
 - **openai** works with any OpenAI-compatible chat completions server —
   point `api_url` at llama.cpp, vLLM, OpenRouter, Groq, LM Studio, etc.
   Requests include [predicted outputs](https://platform.openai.com/docs/guides/predicted-outputs)
@@ -94,6 +100,26 @@ Notes:
 - **zeta** speaks the native editable-region rewrite format of
   [Zed's Zeta models](https://huggingface.co/zed-industries) over a raw
   completions endpoint — serve one locally with Ollama, llama.cpp or vLLM.
+- **zeta2** speaks the newer [Zeta 2](https://huggingface.co/zed-industries/zeta-2)
+  dialect (Seed-Coder-8B): fill-in-the-middle in SPM order with the editable
+  region delimited by git merge markers, matching Zed's `V0211SeedCoder` format.
+
+  Both zeta providers build the prompt themselves and need it passed through
+  **verbatim**, so use a server that does not apply a chat template on top —
+  llama.cpp is the safe choice:
+
+  ```bash
+  llama-server -hf bartowski/zed-industries_zeta-GGUF:Q4_K_M --port 8080 -c 8192
+  ```
+
+  ```lua
+  require("nextedit").setup({ provider = "zeta2", api_url = "http://localhost:8080/v1" })
+  ```
+
+  Both rewrite the whole editable region rather than emitting a minimal edit, so
+  output length — and so latency — is set by `EDITABLE_RADIUS` in
+  `server/src/provider/zeta.rs` (17 lines by default). Lower it if local
+  inference feels slow.
 
 ## Configuration
 
