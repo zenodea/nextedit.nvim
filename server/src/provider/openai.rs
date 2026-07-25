@@ -13,6 +13,7 @@ pub struct OpenAi {
     api_key: Option<String>,
     model: String,
     predicted_outputs: bool,
+    reasoning_effort: Option<String>,
 }
 
 impl OpenAi {
@@ -32,12 +33,21 @@ impl OpenAi {
             bail!("no API key: set NEXTEDIT_API_KEY (or {key_var}) for provider {flavor}");
         }
         let model = std::env::var("NEXTEDIT_MODEL").unwrap_or_else(|_| default_model.into());
+        // Mercury 2 is a reasoning model: left at its default effort it spends
+        // hundreds of tokens thinking before emitting the edit, which dominates
+        // the round trip (~3.8s vs ~0.5s measured). Edit prediction is a
+        // latency-bound, low-difficulty task, so ask for the cheapest tier.
+        let reasoning_effort = std::env::var("NEXTEDIT_REASONING_EFFORT")
+            .ok()
+            .filter(|e| !e.is_empty())
+            .or_else(|| (flavor == "mercury").then(|| "instant".to_string()));
         Ok(Self {
             client: http_client(),
             api_url,
             api_key,
             model,
             predicted_outputs: flavor == "openai",
+            reasoning_effort,
         })
     }
 
@@ -55,11 +65,20 @@ impl OpenAi {
     pub async fn predict(&self, p: &PredictParams) -> Result<Prediction> {
         let mut body = chat_body(&self.model, p);
         let predicted = self.predicted_outputs && add_prediction(&mut body, p);
+        if let Some(effort) = &self.reasoning_effort {
+            body["reasoning_effort"] = json!(effort);
+        }
         let (mut status, mut text) = self.post(&body).await?;
-        // Not every model or compatible server accepts the prediction field
-        // (reasoning models reject it); retry the request without it.
-        if predicted && status == reqwest::StatusCode::BAD_REQUEST {
-            body.as_object_mut().map(|b| b.remove("prediction"));
+        // Not every model or compatible server accepts these fields (reasoning
+        // models reject `prediction`; non-reasoning ones reject
+        // `reasoning_effort`); retry once without whichever we added.
+        if (predicted || self.reasoning_effort.is_some())
+            && status == reqwest::StatusCode::BAD_REQUEST
+        {
+            if let Some(b) = body.as_object_mut() {
+                b.remove("prediction");
+                b.remove("reasoning_effort");
+            }
             (status, text) = self.post(&body).await?;
         }
         if !status.is_success() {
