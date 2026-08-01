@@ -1,16 +1,18 @@
 # nextedit.nvim
 
-Cursor-style next-edit prediction for Neovim. As you type, it predicts the
-edit you are about to make — based on what you have *been* editing, not just
-the text at the cursor — and shows it as a diff overlay you accept with
-`<Tab>`.
+Cursor-style next-edit prediction for Neovim. When you finish an edit, it
+predicts the edit you are about to make next — based on what you have *been*
+editing, not just the text at the cursor — and shows it as a diff overlay you
+accept with `<Tab>`.
 
 Classic completion plugins guess the text that continues at your cursor.
 Next-edit prediction watches the *changes* you make instead. Rename a
 variable, and it offers the same rename at the next usage. Change a function
-signature, and it offers to fix the call sites nearby. Start typing a line,
-and it offers to finish it. Accepting an edit requests the next prediction
-automatically, so repetitive changes become Tab, Tab, Tab.
+signature, and it offers to fix the call sites nearby. Predictions are
+requested at edit boundaries — when you leave insert mode or make a
+normal-mode change — never mid-keystroke, so the model always reasons about a
+completed edit. Accepting an edit requests the next prediction automatically,
+so repetitive changes become Tab, Tab, Tab.
 
 ## Features
 
@@ -53,14 +55,15 @@ the repo to your runtimepath, and call `require("nextedit").setup()`.
 
 ## Usage
 
-Just type. After a short pause (150 ms default) a prediction may appear: the
-lines it would replace are highlighted (`NextEditOld`), the proposed lines
-show underneath (`NextEditNew`).
+Just edit. When you leave insert mode or make a normal-mode change, a
+prediction may appear after a short debounce (150 ms default): the lines it
+would replace are highlighted (`NextEditOld`), the proposed lines show
+underneath (`NextEditNew`). Entering insert mode or typing clears it.
 
 | Key / command      | Action                                   |
 | ------------------ | ---------------------------------------- |
-| `<Tab>`            | Accept the prediction (falls through to normal `<Tab>` when none is shown) |
-| `<C-]>`            | Dismiss the prediction                   |
+| `<Tab>` (normal mode) | Accept the prediction (falls through to normal `<Tab>` when none is shown) |
+| `<C-]>` / `<Esc>`  | Dismiss the prediction                   |
 | `:NextEdit`        | Request a prediction now                 |
 | `:NextEditRestart` | Restart the server process               |
 | `:checkhealth nextedit` | Diagnose binary, server and credential problems |
@@ -174,8 +177,9 @@ HTTP; tokio also makes cancelling superseded requests trivial.
 
 A prediction cycle:
 
-1. On every text change the current overlay is dismissed and a debounce timer
-   restarts.
+1. At an edit boundary (leaving insert mode, or a normal-mode change) the
+   current overlay is dismissed and a debounce timer restarts. Typing in
+   insert mode never triggers a request — it only clears the overlay.
 2. When the timer fires, the excerpt around the cursor, the cursor line, and
    the recent-edit history go to the server. A new request aborts any
    in-flight one; the Lua side also drops responses whose id or changedtick
