@@ -47,6 +47,19 @@ diffmod.commit(dbuf)
 check("history: distant commit starts a new entry", #diffmod.take(dbuf), 2)
 diffmod.forget(dbuf)
 
+-- Rendering: small word changes are inline, rewrites fall back to block style.
+local render = require("nextedit.render")
+local inline = render.extmarks({ "local foo = 1" }, { "local bar = 1" }, 10)
+check("render: word change makes two inline marks", #inline, 2)
+check("render: deletion span covers the old word",
+  { inline[1][1], inline[1][2], inline[1][3].end_col }, { 10, 6, 9 })
+check("render: insertion is inline virtual text", inline[2][3].virt_text[1][1], "bar")
+local block = render.extmarks({ "x" }, { "something totally different" }, 0)
+check("render: rewrite falls back to line highlight", block[1][3].line_hl_group, "NextEditOld")
+check("render: rewrite shows the new line below", block[2][3].virt_lines[1][1][1], "something totally different")
+local grow = render.extmarks({ "a", "b" }, { "a", "b", "c" }, 0)
+check("render: pure insertion renders as virtual lines", grow[1][3].virt_lines[1][1][1], "c")
+
 local SAMPLE = {
   "def add(a: int, b: int) -> int:",
   "    return a + b",

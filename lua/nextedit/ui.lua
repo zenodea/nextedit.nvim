@@ -1,6 +1,8 @@
--- Renders the pending prediction as a line-based diff overlay and applies it:
--- the lines that would change are highlighted, the proposed lines appear as
--- virtual lines below them.
+-- Renders the pending prediction as a diff overlay and applies it. Rendering
+-- is delegated to render.lua: word-level inline marks for small changes, a
+-- block overlay (old lines highlighted, new lines below) otherwise.
+local render = require("nextedit.render")
+
 local M = {}
 
 local ns = vim.api.nvim_create_namespace("nextedit")
@@ -12,17 +14,13 @@ function M.show(buf, pred, tick)
   if pred.end_line > vim.api.nvim_buf_line_count(buf) then
     return
   end
-  -- Mark the lines that would be replaced.
-  for lnum = pred.start_line, pred.end_line do
-    vim.api.nvim_buf_set_extmark(buf, ns, lnum - 1, 0, { line_hl_group = "NextEditOld" })
+  local original = vim.api.nvim_buf_get_lines(buf, pred.start_line - 1, pred.end_line, false)
+  local marks = render.extmarks(original, pred.replacement, pred.start_line - 1)
+  if #marks == 0 then
+    return
   end
-  -- Show the proposed lines below the range (none for a pure deletion).
-  if #pred.replacement > 0 then
-    local virt = {}
-    for _, line in ipairs(pred.replacement) do
-      table.insert(virt, { { line == "" and " " or line, "NextEditNew" } })
-    end
-    vim.api.nvim_buf_set_extmark(buf, ns, pred.end_line - 1, 0, { virt_lines = virt })
+  for _, m in ipairs(marks) do
+    vim.api.nvim_buf_set_extmark(buf, ns, m[1], m[2], m[3])
   end
   current = {
     buf = buf,
