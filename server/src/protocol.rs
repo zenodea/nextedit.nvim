@@ -21,6 +21,9 @@ pub struct PredictParams {
     pub excerpt_lines: Vec<String>,
     /// Unified diffs of the user's recent edits, oldest first.
     pub recent_edits: Vec<String>,
+    /// Error/warning diagnostics inside the excerpt, pre-formatted one per line.
+    #[serde(default)]
+    pub diagnostics: Vec<String>,
 }
 
 /// One JSON object per line on stdout.

@@ -64,6 +64,8 @@ current text in the replacement.
 - Prefer one small, high-confidence edit at or near the cursor. Do not rewrite \
 code the user has not touched.
 - Match the file's existing style exactly (indentation, naming, quoting).
+- Diagnostics, when present, usually point at the fix the user is about to \
+make; an edit that resolves one near the cursor is a strong prediction.
 - If you have no confident prediction, set has_edit to false. A wrong prediction \
 is worse than none.";
 
@@ -156,6 +158,12 @@ pub(crate) fn user_prompt(p: &PredictParams) -> String {
             let _ = writeln!(s, "{n:5}| {}", insert_marker(line, p.cursor_col, CURSOR_MARKER));
         } else {
             let _ = writeln!(s, "{n:5}| {line}");
+        }
+    }
+    if !p.diagnostics.is_empty() {
+        s.push_str("\nDiagnostics in the excerpt:\n");
+        for d in &p.diagnostics {
+            let _ = writeln!(s, "{d}");
         }
     }
     s.push_str("\nPredict the user's next edit.");
