@@ -158,12 +158,16 @@ function M.setup(user_opts)
   vim.api.nvim_create_autocmd("ModeChanged", {
     group = group,
     pattern = "i*:n",
-    callback = schedule_prediction,
+    callback = function(ev)
+      diff.commit(ev.buf)
+      schedule_prediction()
+    end,
   })
   vim.api.nvim_create_autocmd("TextChanged", {
     group = group,
-    callback = function()
+    callback = function(ev)
       ui.dismiss()
+      diff.commit(ev.buf)
       schedule_prediction()
     end,
   })
