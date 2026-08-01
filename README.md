@@ -75,6 +75,7 @@ replace are highlighted (`NextEditOld`), the proposed lines show underneath
 | `<C-]>` / `<Esc>`  | Dismiss the prediction                   |
 | `:NextEdit`        | Request a prediction now                 |
 | `:NextEditRestart` | Restart the server process               |
+| `:NextEditSignIn`  | GitHub device-code sign-in (`copilot-nes` only) |
 | `:checkhealth nextedit` | Diagnose binary, server and credential problems |
 
 ## Providers
@@ -103,12 +104,16 @@ Notes:
   sign in once with `:Copilot auth` and it works with your existing Copilot
   subscription. Any model available to Copilot chat can be set via `model`.
 - **copilot-nes** uses GitHub's purpose-trained Next Edit Suggestions model
-  by talking LSP to the `copilot-language-server` attached to your buffer —
-  the same backend sidekick.nvim and VS Code use, and the only provider here
-  running a model actually trained for next-edit prediction. It needs the
-  Copilot LSP running in Neovim (copilot.lua, or a native `vim.lsp.enable`
-  config) and a Copilot sign-in; the Rust sidecar, prompt pipeline and edit
-  history are all bypassed — Copilot tracks your edits server-side.
+  by talking LSP to `copilot-language-server` — the same backend
+  sidekick.nvim and VS Code use, and the only provider here running a model
+  actually trained for next-edit prediction. No plugin dependency: a running
+  Copilot client (say, copilot.lua's) is reused when present, otherwise the
+  server is started directly — install it with
+  `npm install -g @github/copilot-language-server` or
+  `:MasonInstall copilot-language-server`. Sign in once with
+  `:NextEditSignIn` (any existing Copilot sign-in also counts). The Rust
+  sidecar, prompt pipeline and edit history are all bypassed — Copilot
+  tracks your edits server-side.
 - **mercury** is Inception Labs' diffusion coder; at ~1000 tok/s it is a
   particularly good latency fit for edit prediction. `mercury-2` is a reasoning
   model, so requests ask for `reasoning_effort: instant` — left at the default

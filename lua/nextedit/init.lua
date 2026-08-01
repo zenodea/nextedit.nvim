@@ -201,13 +201,20 @@ function M.setup(user_opts)
 
   local group = vim.api.nvim_create_augroup("nextedit", { clear = true })
   if opts.provider == "copilot-nes" then
-    vim.api.nvim_create_autocmd({ "BufEnter", "LspAttach" }, {
+    vim.api.nvim_create_autocmd("BufEnter", {
+      group = group,
+      callback = function(ev)
+        nes.attach(ev.buf)
+      end,
+    })
+    vim.api.nvim_create_autocmd("LspAttach", {
       group = group,
       callback = function(ev)
         nes.did_focus(ev.buf)
       end,
     })
-    nes.did_focus(vim.api.nvim_get_current_buf())
+    nes.attach(vim.api.nvim_get_current_buf())
+    vim.api.nvim_create_user_command("NextEditSignIn", nes.sign_in, { desc = "Sign in to GitHub Copilot" })
   end
   -- Predictions are requested at edit boundaries — leaving insert mode or a
   -- normal-mode buffer change — never mid-keystroke, so the model always sees

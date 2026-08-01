@@ -47,10 +47,22 @@ function M.check()
     if client then
       h.ok("Copilot LSP client running: " .. client.name)
     else
-      h.warn("no Copilot LSP client running", {
-        "install copilot-language-server (e.g. copilot.lua with its LSP enabled, or a native vim.lsp.enable config)",
-        "sign in with :Copilot auth, then open a normal file buffer",
-      })
+      local bin = require("nextedit.nes").binary()
+      if bin then
+        h.ok("copilot-language-server found: " .. bin .. " (starts on demand)")
+      else
+        h.error("copilot-language-server not found", {
+          "npm install -g @github/copilot-language-server",
+          "or :MasonInstall copilot-language-server",
+          "(a running copilot.lua client would also be reused)",
+        })
+      end
+    end
+    local file = copilot_token_file()
+    if file then
+      h.ok("copilot sign-in found: " .. file)
+    else
+      h.warn("no Copilot sign-in found", { "run :NextEditSignIn" })
     end
     return
   end
