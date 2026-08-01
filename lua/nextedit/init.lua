@@ -1,4 +1,5 @@
 local diff = require("nextedit.diff")
+local nes = require("nextedit.nes")
 local server = require("nextedit.server")
 local track = require("nextedit.track")
 local ui = require("nextedit.ui")
@@ -16,7 +17,7 @@ local defaults = {
   accept_key = "<Tab>",
   dismiss_key = "<C-]>",
   server_cmd = nil, -- defaults to the bundled Rust binary
-  provider = nil, -- "anthropic" (default), "copilot", "openai", "mercury", "gemini", "xai", "mistral", "openrouter", "ollama" or "zeta"
+  provider = nil, -- "anthropic" (default), "copilot", "copilot-nes", "openai", "mercury", "gemini", "xai", "mistral", "openrouter", "ollama" or "zeta"
   model = nil, -- provider-specific model name
   api_url = nil, -- override the provider's endpoint, e.g. a local llama.cpp server
   api_key = nil, -- prefer the provider's env var; set this only for keyless local setups
@@ -112,6 +113,27 @@ local function request_prediction()
     end
     inflight = nil -- response never came; assume the server lost it
   end
+  -- copilot-nes speaks LSP to the Copilot server directly; the sidecar and
+  -- the excerpt/remap machinery are not involved (responses are tied to a
+  -- document version, so stale ones are dropped rather than remapped).
+  if opts.provider == "copilot-nes" then
+    local sent = nes.request(buf, function(result, err)
+      inflight = nil
+      if err then
+        vim.notify("nextedit: " .. err, vim.log.levels.WARN)
+      elseif result and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_current_buf() == buf then
+        ui.show(buf, result, vim.b[buf].changedtick)
+      end
+      if rerequest then
+        rerequest = false
+        request_prediction()
+      end
+    end)
+    if sent then
+      inflight = { buf = buf, sent_at = vim.uv.now() }
+    end
+    return
+  end
   local cursor = vim.api.nvim_win_get_cursor(0)
   local cursor_line = cursor[1]
   local first = math.max(1, cursor_line - opts.context_lines)
@@ -172,11 +194,21 @@ function M.setup(user_opts)
   vim.api.nvim_set_hl(0, "NextEditNew", { default = true, link = "DiffAdd" })
   vim.api.nvim_set_hl(0, "NextEditSign", { default = true, link = "DiagnosticSignInfo" })
 
-  if not server.start(opts.server_cmd or default_server_cmd(), server_env()) then
+  -- copilot-nes runs over the Copilot LSP client; no sidecar to start.
+  if opts.provider ~= "copilot-nes" and not server.start(opts.server_cmd or default_server_cmd(), server_env()) then
     return
   end
 
   local group = vim.api.nvim_create_augroup("nextedit", { clear = true })
+  if opts.provider == "copilot-nes" then
+    vim.api.nvim_create_autocmd({ "BufEnter", "LspAttach" }, {
+      group = group,
+      callback = function(ev)
+        nes.did_focus(ev.buf)
+      end,
+    })
+    nes.did_focus(vim.api.nvim_get_current_buf())
+  end
   -- Predictions are requested at edit boundaries — leaving insert mode or a
   -- normal-mode buffer change — never mid-keystroke, so the model always sees
   -- a completed edit instead of a half-typed identifier.
@@ -258,6 +290,10 @@ function M.setup(user_opts)
 
   vim.api.nvim_create_user_command("NextEdit", request_prediction, { desc = "Request a prediction now" })
   vim.api.nvim_create_user_command("NextEditRestart", function()
+    if opts.provider == "copilot-nes" then
+      vim.notify("nextedit: copilot-nes uses the Copilot LSP client; restart that instead (:LspRestart)", vim.log.levels.INFO)
+      return
+    end
     server.stop()
     server.start(opts.server_cmd or default_server_cmd(), server_env())
   end, { desc = "Restart the nextedit server" })

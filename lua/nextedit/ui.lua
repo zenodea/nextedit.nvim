@@ -62,6 +62,7 @@ function M.show(buf, pred, tick)
     start_line = pred.start_line,
     end_line = pred.end_line,
     replacement = pred.replacement,
+    on_accept = pred.on_accept,
     tick = tick,
     jump_pos = { marks[1][1] + 1, marks[1][2] },
   }
@@ -76,7 +77,12 @@ end
 function M.refresh()
   if current then
     local c = current
-    M.show(c.buf, { start_line = c.start_line, end_line = c.end_line, replacement = c.replacement }, c.tick)
+    M.show(c.buf, {
+      start_line = c.start_line,
+      end_line = c.end_line,
+      replacement = c.replacement,
+      on_accept = c.on_accept,
+    }, c.tick)
   end
 end
 
@@ -116,6 +122,9 @@ function M.accept()
     local last = math.min(c.start_line + math.max(#c.replacement, 1) - 1, vim.api.nvim_buf_line_count(c.buf))
     local col = #(vim.api.nvim_buf_get_lines(c.buf, last - 1, last, false)[1] or "")
     vim.api.nvim_win_set_cursor(win, { last, col })
+  end
+  if c.on_accept then
+    pcall(c.on_accept)
   end
   return true
 end
