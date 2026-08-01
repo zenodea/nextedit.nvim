@@ -374,6 +374,7 @@ mod tests {
             filetype: "rust".into(),
             cursor_line: 2,
             cursor_col: "editable".len(),
+            diagnostics: vec![],
             excerpt_start: 1,
             excerpt_lines: lines(&["prefix", "editable", "suffix"]),
             recent_edits: vec!["-old\n+new".into()],

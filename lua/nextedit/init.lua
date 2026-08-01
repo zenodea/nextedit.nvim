@@ -75,6 +75,24 @@ local function remap_and_show(buf, params, result)
   }, vim.b[buf].changedtick)
 end
 
+--- Error and warning diagnostics inside the excerpt, formatted for the
+--- prompt. An LSP error where the user just edited is the strongest "next
+--- edit" signal there is.
+local function excerpt_diagnostics(buf, first, last)
+  local out = {}
+  for _, d in ipairs(vim.diagnostic.get(buf)) do
+    local lnum = d.lnum + 1
+    if lnum >= first and lnum <= last and d.severity <= vim.diagnostic.severity.WARN then
+      local severity = vim.diagnostic.severity[d.severity] or "?"
+      out[#out + 1] = ("line %d [%s]: %s"):format(lnum, severity, d.message:gsub("%s+", " "))
+      if #out >= 8 then
+        break
+      end
+    end
+  end
+  return out
+end
+
 local function request_prediction()
   local buf = vim.api.nvim_get_current_buf()
   if not vim.api.nvim_buf_is_valid(buf) or vim.bo[buf].buftype ~= "" then
@@ -101,6 +119,7 @@ local function request_prediction()
     excerpt_start = first,
     excerpt_lines = vim.api.nvim_buf_get_lines(buf, first - 1, last, false),
     recent_edits = diff.take(buf),
+    diagnostics = excerpt_diagnostics(buf, first, last),
   }
   track.begin(buf)
   local id = server.predict(params, function(result, err)
