@@ -34,6 +34,27 @@ function M.check()
     return
   end
 
+  local provider0 = opts.provider or env("NEXTEDIT_PROVIDER") or "anthropic"
+  if provider0 == "copilot-nes" then
+    h.info("provider copilot-nes (Copilot LSP; the Rust sidecar is not used)")
+    local client
+    for _, c in ipairs(vim.lsp.get_clients()) do
+      if c.name:lower():find("copilot", 1, true) then
+        client = c
+        break
+      end
+    end
+    if client then
+      h.ok("Copilot LSP client running: " .. client.name)
+    else
+      h.warn("no Copilot LSP client running", {
+        "install copilot-language-server (e.g. copilot.lua with its LSP enabled, or a native vim.lsp.enable config)",
+        "sign in with :Copilot auth, then open a normal file buffer",
+      })
+    end
+    return
+  end
+
   local cmd = require("nextedit").server_command()
   if vim.fn.executable(cmd[1]) == 1 then
     h.ok("server binary: " .. cmd[1])
