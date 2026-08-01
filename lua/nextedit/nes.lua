@@ -1,9 +1,11 @@
--- Copilot's native Next Edit Suggestions, spoken directly to the
--- copilot-language-server LSP client attached to the buffer (by copilot.lua
--- with its LSP, or `vim.lsp.enable` on a native config). Unlike the other
--- providers this bypasses the Rust sidecar entirely: Neovim's LSP client
--- already keeps the document in sync, so we only issue GitHub's custom
--- textDocument/copilotInlineEdit request and translate the reply.
+-- Copilot's native Next Edit Suggestions, spoken directly to a
+-- copilot-language-server LSP client. No plugin dependency: a running
+-- Copilot client (e.g. copilot.lua's) is reused when present, otherwise the
+-- server is started with vim.lsp.start, and sign-in is handled here via the
+-- server's device-code flow. Unlike the other providers this bypasses the
+-- Rust sidecar entirely: Neovim's LSP client already keeps the document in
+-- sync, so we only issue GitHub's custom textDocument/copilotInlineEdit
+-- request and translate the reply.
 local M = {}
 
 local inflight = nil -- { client_id, request_id }
@@ -30,14 +32,14 @@ local function lsp_cancel(client, request_id)
   end
   return client.cancel_request(request_id)
 end
-local function lsp_exec(client, command, buf)
+local function lsp_exec(client, command, buf, handler)
   if has_011 then
-    return client:exec_cmd(command, { bufnr = buf })
+    return client:exec_cmd(command, { bufnr = buf }, handler)
   end
   return client.request(
     "workspace/executeCommand",
     { command = command.command, arguments = command.arguments },
-    nil,
+    handler,
     buf
   )
 end
@@ -48,6 +50,89 @@ function M.client_for(buf)
       return client
     end
   end
+end
+
+--- Locate copilot-language-server: on PATH
+--- (`npm install -g @github/copilot-language-server`) or a mason install.
+function M.binary()
+  local exe = vim.fn.exepath("copilot-language-server")
+  if exe ~= "" then
+    return exe
+  end
+  local mason = vim.fn.stdpath("data") .. "/mason/bin/copilot-language-server"
+  if vim.fn.executable(mason) == 1 then
+    return mason
+  end
+end
+
+--- Make sure a Copilot client is attached to buf: reuse a running one (e.g.
+--- copilot.lua's), else start copilot-language-server ourselves.
+function M.attach(buf)
+  if not vim.api.nvim_buf_is_valid(buf) or vim.bo[buf].buftype ~= "" then
+    return
+  end
+  if not M.client_for(buf) then
+    local running
+    for _, client in ipairs(vim.lsp.get_clients()) do
+      if client.name:lower():find("copilot", 1, true) then
+        running = client
+        break
+      end
+    end
+    if running then
+      vim.lsp.buf_attach_client(buf, running.id)
+    else
+      local bin = M.binary()
+      if not bin then
+        return -- :checkhealth nextedit explains how to install it
+      end
+      vim.lsp.start({
+        name = "copilot-ls",
+        cmd = { bin, "--stdio" },
+        root_dir = vim.fs.root(buf, { ".git" }) or vim.uv.cwd(),
+        init_options = {
+          editorInfo = { name = "Neovim", version = tostring(vim.version()) },
+          editorPluginInfo = { name = "nextedit.nvim", version = "0.1.0" },
+        },
+      }, { bufnr = buf })
+    end
+  end
+  M.did_focus(buf)
+end
+
+--- GitHub device-code sign-in through the server, so no other plugin is
+--- needed to authenticate. The resulting token lands in the standard Copilot
+--- config directory, shared with every other Copilot integration.
+function M.sign_in()
+  local buf = vim.api.nvim_get_current_buf()
+  M.attach(buf)
+  local client = M.client_for(buf)
+  if not client then
+    vim.notify("nextedit: no Copilot LSP client (is copilot-language-server installed?)", vim.log.levels.ERROR)
+    return
+  end
+  lsp_request(client, "signIn", vim.empty_dict(), function(err, res)
+    if err then
+      return vim.notify("nextedit: sign-in failed: " .. (err.message or vim.inspect(err)), vim.log.levels.ERROR)
+    end
+    res = res or {}
+    if res.userCode and res.verificationUri then
+      pcall(vim.fn.setreg, "+", res.userCode)
+      vim.notify(("nextedit: enter code %s at %s (code copied to clipboard)"):format(res.userCode, res.verificationUri))
+      pcall(vim.ui.open, res.verificationUri)
+    end
+    if res.command then
+      -- Completes (and waits out) the device flow server-side.
+      lsp_exec(client, res.command, buf, function(cerr, cres)
+        if cerr then
+          vim.notify("nextedit: sign-in failed: " .. (cerr.message or vim.inspect(cerr)), vim.log.levels.ERROR)
+        else
+          local user = cres and cres.user and (" as " .. cres.user) or ""
+          vim.notify("nextedit: Copilot signed in" .. user)
+        end
+      end)
+    end
+  end, buf)
 end
 
 --- Copilot produces no suggestions for a document it was never told has
