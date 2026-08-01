@@ -5,7 +5,12 @@ local ui = require("nextedit.ui")
 
 local M = {}
 
+-- Providers fast enough (and trained) to predict mid-typing; chat providers
+-- reason better about a completed edit than a half-typed identifier.
+local TYPING_PROVIDERS = { mercury = true, ollama = true, zeta = true, zeta2 = true }
+
 local defaults = {
+  trigger = nil, -- "boundary" | "typing"; defaults to "typing" for mercury/ollama/zeta, "boundary" otherwise
   debounce_ms = 150,
   context_lines = 40, -- buffer context sent above and below the cursor
   accept_key = "<Tab>",
@@ -191,13 +196,28 @@ function M.setup(user_opts)
       schedule_prediction()
     end,
   })
-  vim.api.nvim_create_autocmd({ "TextChangedI", "InsertEnter" }, {
-    group = group,
-    callback = function()
-      timer:stop()
-      ui.dismiss()
-    end,
-  })
+  local provider = opts.provider or vim.env.NEXTEDIT_PROVIDER or "anthropic"
+  local trigger = opts.trigger or (TYPING_PROVIDERS[provider] and "typing" or "boundary")
+  if trigger == "typing" then
+    -- Also predict while typing: fast edit-prediction models handle
+    -- half-finished lines well, and the round trip is cheap enough.
+    vim.api.nvim_create_autocmd("TextChangedI", {
+      group = group,
+      callback = function()
+        ui.dismiss()
+        schedule_prediction()
+      end,
+    })
+    vim.api.nvim_create_autocmd("InsertEnter", { group = group, callback = ui.dismiss })
+  else
+    vim.api.nvim_create_autocmd({ "TextChangedI", "InsertEnter" }, {
+      group = group,
+      callback = function()
+        timer:stop()
+        ui.dismiss()
+      end,
+    })
+  end
   local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
   vim.on_key(function(_, typed)
     if typed == esc and ui.visible() and vim.api.nvim_get_mode().mode == "n" then
@@ -218,17 +238,19 @@ function M.setup(user_opts)
     end,
   })
 
-  -- Normal mode only: predictions are cleared on InsertEnter, so an
+  -- In boundary mode predictions are cleared on InsertEnter, so an
   -- insert-mode mapping would never fire and would shadow completion/snippet
-  -- <Tab> mappings for nothing.
-  vim.keymap.set("n", opts.accept_key, function()
+  -- <Tab> mappings for nothing; in typing mode predictions appear while
+  -- typing, so accept/dismiss must work there too.
+  local modes = trigger == "typing" and { "i", "n" } or "n"
+  vim.keymap.set(modes, opts.accept_key, function()
     if not ui.accept() then
       -- No prediction pending: pass the key through with its default behavior.
       local key = vim.api.nvim_replace_termcodes(opts.accept_key, true, false, true)
       vim.api.nvim_feedkeys(key, "n", false)
     end
   end, { desc = "nextedit: accept prediction" })
-  vim.keymap.set("n", opts.dismiss_key, ui.dismiss, { desc = "nextedit: dismiss prediction" })
+  vim.keymap.set(modes, opts.dismiss_key, ui.dismiss, { desc = "nextedit: dismiss prediction" })
 
   vim.api.nvim_create_user_command("NextEdit", request_prediction, { desc = "Request a prediction now" })
   vim.api.nvim_create_user_command("NextEditRestart", function()
