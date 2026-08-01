@@ -21,17 +21,20 @@ pub enum Provider {
 
 impl Provider {
     /// Selected by NEXTEDIT_PROVIDER: anthropic (default), copilot, openai,
-    /// mercury, ollama, zeta or zeta2.
+    /// mercury, gemini, xai, mistral, openrouter, ollama, zeta or zeta2.
     pub fn from_env() -> Result<Self> {
         let name = std::env::var("NEXTEDIT_PROVIDER").unwrap_or_else(|_| "anthropic".into());
         match name.as_str() {
             "anthropic" => Ok(Self::Anthropic(anthropic::Anthropic::from_env()?)),
             "copilot" => Ok(Self::Copilot(copilot::Copilot::from_env()?)),
-            "openai" | "mercury" | "ollama" => Ok(Self::OpenAi(openai::OpenAi::from_env(&name)?)),
+            "openai" | "mercury" | "ollama" | "gemini" | "xai" | "mistral" | "openrouter" => {
+                Ok(Self::OpenAi(openai::OpenAi::from_env(&name)?))
+            }
             "zeta" => Ok(Self::Zeta(zeta::Zeta::from_env(zeta::Format::V1)?)),
             "zeta2" => Ok(Self::Zeta(zeta::Zeta::from_env(zeta::Format::V2)?)),
             other => bail!(
-                "unknown NEXTEDIT_PROVIDER {other:?} (expected anthropic, copilot, openai, mercury, ollama, zeta or zeta2)"
+                "unknown NEXTEDIT_PROVIDER {other:?} (expected anthropic, copilot, openai, \
+                 mercury, gemini, xai, mistral, openrouter, ollama, zeta or zeta2)"
             ),
         }
     }

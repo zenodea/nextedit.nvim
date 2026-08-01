@@ -21,6 +21,18 @@ impl OpenAi {
         let (default_url, key_var, default_model) = match flavor {
             "mercury" => ("https://api.inceptionlabs.ai/v1", "INCEPTION_API_KEY", "mercury-2"),
             "ollama" => ("http://localhost:11434/v1", "", "qwen2.5-coder:7b"),
+            "gemini" => (
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "GEMINI_API_KEY",
+                "gemini-2.5-flash",
+            ),
+            "xai" => ("https://api.x.ai/v1", "XAI_API_KEY", "grok-code-fast-1"),
+            "mistral" => ("https://api.mistral.ai/v1", "MISTRAL_API_KEY", "codestral-latest"),
+            "openrouter" => (
+                "https://openrouter.ai/api/v1",
+                "OPENROUTER_API_KEY",
+                "google/gemini-2.5-flash-lite",
+            ),
             _ => ("https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-5-mini"),
         };
         let base = std::env::var("NEXTEDIT_API_URL").unwrap_or_else(|_| default_url.into());

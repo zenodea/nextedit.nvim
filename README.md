@@ -85,6 +85,10 @@ replace are highlighted (`NextEditOld`), the proposed lines show underneath
 | `copilot`   | api.githubcopilot.com   | `gpt-4.1`          | Copilot sign-in (see below)      |
 | `openai`    | api.openai.com/v1       | `gpt-5-mini`       | `OPENAI_API_KEY`                 |
 | `mercury`   | api.inceptionlabs.ai/v1 | `mercury-2`        | `INCEPTION_API_KEY`              |
+| `gemini`    | generativelanguage.googleapis.com | `gemini-2.5-flash` | `GEMINI_API_KEY`         |
+| `xai`       | api.x.ai/v1             | `grok-code-fast-1` | `XAI_API_KEY`                    |
+| `mistral`   | api.mistral.ai/v1       | `codestral-latest` | `MISTRAL_API_KEY`                |
+| `openrouter`| openrouter.ai/api/v1    | `google/gemini-2.5-flash-lite` | `OPENROUTER_API_KEY` |
 | `ollama`    | localhost:11434/v1      | `qwen2.5-coder:7b` | none                             |
 | `zeta`      | localhost:11434/v1      | `zeta`             | none                             |
 | `zeta2`     | localhost:11434/v1      | `zeta2`            | none                             |
@@ -104,6 +108,10 @@ Notes:
   dominates the round trip (~2.9s median vs ~0.4s measured). Override with
   `NEXTEDIT_REASONING_EFFORT` (`instant`, `low`, `medium`, `high`) if you want
   to trade latency back for prediction quality.
+- **gemini**, **xai**, **mistral** and **openrouter** speak the same
+  OpenAI-compatible dialect with their own endpoints and key variables.
+  `grok-code-fast-1` and Gemini Flash are fast enough that
+  `trigger = "typing"` is worth trying with them.
 - **openai** works with any OpenAI-compatible chat completions server —
   point `api_url` at llama.cpp, vLLM, OpenRouter, Groq, LM Studio, etc.
   Requests include [predicted outputs](https://platform.openai.com/docs/guides/predicted-outputs)
