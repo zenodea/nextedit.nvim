@@ -106,6 +106,16 @@ vim.wait(100)
 vim.api.nvim_buf_set_lines(0, 3, 4, false, { "def sub(x, y):" })
 check("overlap live: prediction is dropped", vim.wait(1500, ui.visible, 10), false)
 
+-- 4. Cursor far from the prediction: first accept jumps, second applies.
+reset_buffer()
+vim.api.nvim_buf_set_lines(0, 5, 5, false, { "", "# 7", "# 8", "# 9", "# 10", "# 11", "# 12" })
+vim.api.nvim_win_set_cursor(0, { 12, 0 })
+check("jump: prediction arrives", predict_and_wait(), true)
+check("jump: first accept jumps instead of applying", ui.accept(), true)
+check("jump: cursor lands on the edit", vim.api.nvim_win_get_cursor(0)[1], 4)
+check("jump: second accept applies", ui.accept(), true)
+check("jump: line 4 replaced", vim.api.nvim_buf_get_lines(0, 3, 4, false), { "def sub(a: int, b: int) -> int:" })
+
 if failures > 0 then
   print(failures .. " failure(s)")
   vim.cmd.cquit()
