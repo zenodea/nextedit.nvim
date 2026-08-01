@@ -8,11 +8,12 @@ accept with `<Tab>`.
 Classic completion plugins guess the text that continues at your cursor.
 Next-edit prediction watches the *changes* you make instead. Rename a
 variable, and it offers the same rename at the next usage. Change a function
-signature, and it offers to fix the call sites nearby. Predictions are
-requested at edit boundaries — when you leave insert mode or make a
-normal-mode change — never mid-keystroke, so the model always reasons about a
-completed edit. Accepting an edit requests the next prediction automatically,
-so repetitive changes become Tab, Tab, Tab.
+signature, and it offers to fix the call sites nearby. With chat providers,
+predictions are requested at edit boundaries — when you leave insert mode or
+make a normal-mode change — so the model always reasons about a completed
+edit; with fast edit-prediction providers (Mercury, Ollama, Zeta) they are
+also requested as you type. Accepting an edit requests the next prediction
+automatically, so repetitive changes become Tab, Tab, Tab.
 
 ## Features
 
@@ -62,10 +63,11 @@ the repo to your runtimepath, and call `require("nextedit").setup()`.
 
 ## Usage
 
-Just edit. When you leave insert mode or make a normal-mode change, a
-prediction may appear after a short debounce (150 ms default): the lines it
-would replace are highlighted (`NextEditOld`), the proposed lines show
-underneath (`NextEditNew`). Entering insert mode or typing clears it.
+Just edit. At a trigger point — leaving insert mode or a normal-mode change,
+plus every typing pause with a `"typing"`-triggered provider — a prediction
+may appear after a short debounce (150 ms default): the lines it would
+replace are highlighted (`NextEditOld`), the proposed lines show underneath
+(`NextEditNew`).
 
 | Key / command      | Action                                   |
 | ------------------ | ---------------------------------------- |
@@ -137,6 +139,9 @@ Defaults shown:
 
 ```lua
 require("nextedit").setup({
+  trigger = nil,         -- "boundary" (predict when you leave insert mode or change text in
+                         -- normal mode) or "typing" (also predict as you type in insert mode);
+                         -- defaults to "typing" for mercury/ollama/zeta, "boundary" otherwise
   debounce_ms = 150,     -- pause after typing before requesting a prediction
   context_lines = 40,    -- buffer lines sent above and below the cursor
   accept_key = "<Tab>",
@@ -188,9 +193,9 @@ makes cancelling superseded requests trivial.
 
 A prediction cycle:
 
-1. At an edit boundary (leaving insert mode, or a normal-mode change) the
-   current overlay is dismissed and a debounce timer restarts. Typing in
-   insert mode never triggers a request — it only clears the overlay.
+1. At a trigger point (leaving insert mode, a normal-mode change, and — with
+   `trigger = "typing"` — every insert-mode change) the current overlay is
+   dismissed and a debounce timer restarts.
 2. When the timer fires, the excerpt around the cursor, the exact cursor
    position (line and column), the coalesced recent-edit history, and any
    diagnostics in the excerpt go to the server. A new request aborts any
