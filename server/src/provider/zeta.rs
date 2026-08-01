@@ -208,11 +208,10 @@ fn build_prompt(p: &PredictParams, region: &EditableRegion) -> String {
             s.push_str(REGION_START);
             s.push('\n');
         }
-        s.push_str(line);
-        // The plugin only tracks the cursor line, not the column; end of that
-        // line is where a typing user's cursor almost always is.
         if p.excerpt_start + i == p.cursor_line {
-            s.push_str(CURSOR);
+            s.push_str(&super::insert_marker(line, p.cursor_col, CURSOR));
+        } else {
+            s.push_str(line);
         }
         s.push('\n');
         if i == region_last {
@@ -261,11 +260,10 @@ fn build_prompt_v2(p: &PredictParams, region: &EditableRegion) -> String {
     }
     s.push_str(V2_START);
     for (i, line) in region.lines.iter().enumerate() {
-        s.push_str(line);
-        // The plugin tracks the cursor line but not the column; end of that
-        // line is where a typing user's cursor almost always is.
         if region.abs_start + i == p.cursor_line {
-            s.push_str(V2_CURSOR);
+            s.push_str(&super::insert_marker(line, p.cursor_col, V2_CURSOR));
+        } else {
+            s.push_str(line);
         }
         s.push('\n');
     }
@@ -375,6 +373,7 @@ mod tests {
             path: "test.rs".into(),
             filetype: "rust".into(),
             cursor_line: 2,
+            cursor_col: "editable".len(),
             excerpt_start: 1,
             excerpt_lines: lines(&["prefix", "editable", "suffix"]),
             recent_edits: vec!["-old\n+new".into()],

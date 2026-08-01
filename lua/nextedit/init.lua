@@ -89,13 +89,15 @@ local function request_prediction()
     end
     inflight = nil -- response never came; assume the server lost it
   end
-  local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local cursor_line = cursor[1]
   local first = math.max(1, cursor_line - opts.context_lines)
   local last = math.min(vim.api.nvim_buf_line_count(buf), cursor_line + opts.context_lines)
   local params = {
     path = vim.api.nvim_buf_get_name(buf),
     filetype = vim.bo[buf].filetype,
     cursor_line = cursor_line,
+    cursor_col = cursor[2],
     excerpt_start = first,
     excerpt_lines = vim.api.nvim_buf_get_lines(buf, first - 1, last, false),
     recent_edits = diff.take(buf),
