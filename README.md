@@ -41,8 +41,13 @@ automatically, so repetitive changes become Tab, Tab, Tab.
 ## Requirements
 
 - Neovim 0.10+
-- Rust toolchain (to build the server)
+- Rust toolchain (to build the server; not needed for `copilot-nes`)
 - Credentials for your chosen provider (see below), or a local model server
+- For `copilot-nes`: `copilot-language-server` is **required** — the easiest
+  way to get it is adding `zbirenbaum/copilot.lua` as a plugin dependency
+  (its bundled server is used automatically; needs Node 22+). Alternatives:
+  `npm install -g @github/copilot-language-server` or
+  `:MasonInstall copilot-language-server`.
 
 ## Install
 
@@ -84,7 +89,7 @@ replace are highlighted (`NextEditOld`), the proposed lines show underneath
 | ----------- | ----------------------- | ------------------ | -------------------------------- |
 | `anthropic` | api.anthropic.com       | `claude-haiku-4-5` | `ANTHROPIC_API_KEY`              |
 | `copilot`   | api.githubcopilot.com   | `gpt-4.1`          | Copilot sign-in (see below)      |
-| `copilot-nes` | local Copilot LSP     | Copilot's NES model | Copilot sign-in + LSP attached  |
+| `copilot-nes` | local Copilot LSP     | Copilot's NES model | Copilot sign-in + copilot-language-server (see Requirements) |
 | `openai`    | api.openai.com/v1       | `gpt-5-mini`       | `OPENAI_API_KEY`                 |
 | `mercury`   | api.inceptionlabs.ai/v1 | `mercury-2`        | `INCEPTION_API_KEY`              |
 | `gemini`    | generativelanguage.googleapis.com | `gemini-2.5-flash` | `GEMINI_API_KEY`         |
