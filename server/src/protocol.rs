@@ -13,6 +13,9 @@ pub struct PredictParams {
     pub filetype: String,
     /// 1-indexed cursor line in the buffer.
     pub cursor_line: usize,
+    /// 0-indexed byte column within the cursor line.
+    #[serde(default)]
+    pub cursor_col: usize,
     /// Absolute 1-indexed line number of `excerpt_lines[0]`.
     pub excerpt_start: usize,
     pub excerpt_lines: Vec<String>,

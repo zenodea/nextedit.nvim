@@ -54,6 +54,8 @@ are doing: finishing the line they are typing, applying the change they just \
 made to a similar spot, or fixing an inconsistency their last edit introduced.
 
 Rules:
+- <|cursor|> in the excerpt marks the exact cursor position. It is a marker, \
+not buffer text: never include it in the replacement.
 - The edit replaces whole lines start_line..end_line (absolute numbers as shown \
 in the excerpt, inclusive).
 - replacement is the complete new text for that range. To insert new lines after \
@@ -124,6 +126,18 @@ pub(crate) fn http_client() -> reqwest::Client {
         .expect("client builds")
 }
 
+pub(crate) const CURSOR_MARKER: &str = "<|cursor|>";
+
+/// Insert `marker` into `line` at byte `col`, clamped to the line and nudged
+/// back onto a character boundary.
+pub(crate) fn insert_marker(line: &str, col: usize, marker: &str) -> String {
+    let mut col = col.min(line.len());
+    while !line.is_char_boundary(col) {
+        col -= 1;
+    }
+    format!("{}{}{}", &line[..col], marker, &line[col..])
+}
+
 pub(crate) fn user_prompt(p: &PredictParams) -> String {
     use std::fmt::Write;
     let mut s = String::new();
@@ -135,11 +149,14 @@ pub(crate) fn user_prompt(p: &PredictParams) -> String {
     for d in &p.recent_edits {
         let _ = writeln!(s, "```diff\n{}\n```", d.trim_end());
     }
-    let _ = writeln!(s, "\nBuffer excerpt ('>' marks the cursor line, {}):", p.cursor_line);
+    let _ = writeln!(s, "\nBuffer excerpt ({CURSOR_MARKER} marks the cursor):");
     for (i, line) in p.excerpt_lines.iter().enumerate() {
         let n = p.excerpt_start + i;
-        let marker = if n == p.cursor_line { '>' } else { ' ' };
-        let _ = writeln!(s, "{marker}{n:5}| {line}");
+        if n == p.cursor_line {
+            let _ = writeln!(s, "{n:5}| {}", insert_marker(line, p.cursor_col, CURSOR_MARKER));
+        } else {
+            let _ = writeln!(s, "{n:5}| {line}");
+        }
     }
     s.push_str("\nPredict the user's next edit.");
     s
@@ -197,10 +214,12 @@ pub(crate) fn validate(edit: ModelEdit, p: &PredictParams) -> Prediction {
     if edit.start_line < first || edit.end_line > last || edit.start_line > edit.end_line {
         return Prediction::none();
     }
-    let replacement: Vec<String> = if edit.replacement.is_empty() {
+    // Models occasionally echo the cursor marker back; it is never buffer text.
+    let replacement = edit.replacement.replace(CURSOR_MARKER, "");
+    let replacement: Vec<String> = if replacement.is_empty() {
         vec![]
     } else {
-        edit.replacement.split('\n').map(str::to_string).collect()
+        replacement.split('\n').map(str::to_string).collect()
     };
     let current = &p.excerpt_lines[edit.start_line - first..=edit.end_line - first];
     if current == replacement.as_slice() {
