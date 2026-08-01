@@ -59,6 +59,9 @@ check("render: rewrite falls back to line highlight", block[1][3].line_hl_group,
 check("render: rewrite shows the new line below", block[2][3].virt_lines[1][1][1], "something totally different")
 local grow = render.extmarks({ "a", "b" }, { "a", "b", "c" }, 0)
 check("render: pure insertion renders as virtual lines", grow[1][3].virt_lines[1][1][1], "c")
+local flipped = render.extmarks({ "x" }, { "something totally different" }, 3, true)
+check("render: above-placement anchors the preview over the change",
+  { flipped[2][1], flipped[2][3].virt_lines_above }, { 3, true })
 
 local SAMPLE = {
   "def add(a: int, b: int) -> int:",

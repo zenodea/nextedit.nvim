@@ -12,6 +12,31 @@ local current = nil -- { buf, start_line, end_line, replacement, tick, jump_pos 
 -- outright: the first accept jumps to them, the second applies.
 local JUMP_DISTANCE = 5
 
+--- Whether a completion menu is on screen. It floats over the lines right
+--- below the cursor — where the preview normally renders — so the preview
+--- flips above the change while one is open. `package.loaded` guards keep
+--- this from force-loading lazy plugins.
+local function completion_visible()
+  if vim.fn.pumvisible() == 1 then
+    return true
+  end
+  local cmp = package.loaded["cmp"]
+  if cmp then
+    local ok, visible = pcall(cmp.visible)
+    if ok and visible then
+      return true
+    end
+  end
+  local blink = package.loaded["blink.cmp"]
+  if blink then
+    local ok, visible = pcall(blink.is_visible)
+    if ok and visible then
+      return true
+    end
+  end
+  return false
+end
+
 --- pred = { start_line, end_line, replacement } (absolute 1-indexed, inclusive)
 function M.show(buf, pred, tick)
   M.dismiss()
@@ -19,7 +44,7 @@ function M.show(buf, pred, tick)
     return
   end
   local original = vim.api.nvim_buf_get_lines(buf, pred.start_line - 1, pred.end_line, false)
-  local marks = render.extmarks(original, pred.replacement, pred.start_line - 1)
+  local marks = render.extmarks(original, pred.replacement, pred.start_line - 1, completion_visible())
   if #marks == 0 then
     return
   end
@@ -44,6 +69,15 @@ end
 
 function M.visible()
   return current ~= nil
+end
+
+--- Re-render the pending prediction (placement depends on whether a
+--- completion menu is open, so it changes when one closes).
+function M.refresh()
+  if current then
+    local c = current
+    M.show(c.buf, { start_line = c.start_line, end_line = c.end_line, replacement = c.replacement }, c.tick)
+  end
 end
 
 function M.dismiss()
