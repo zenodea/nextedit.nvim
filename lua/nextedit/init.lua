@@ -150,13 +150,34 @@ function M.setup(user_opts)
   end
 
   local group = vim.api.nvim_create_augroup("nextedit", { clear = true })
-  vim.api.nvim_create_autocmd({ "TextChangedI", "TextChanged" }, {
+  -- Predictions are requested at edit boundaries — leaving insert mode or a
+  -- normal-mode buffer change — never mid-keystroke, so the model always sees
+  -- a completed edit instead of a half-typed identifier.
+  vim.api.nvim_create_autocmd("ModeChanged", {
+    group = group,
+    pattern = "i*:n",
+    callback = schedule_prediction,
+  })
+  vim.api.nvim_create_autocmd("TextChanged", {
     group = group,
     callback = function()
       ui.dismiss()
       schedule_prediction()
     end,
   })
+  vim.api.nvim_create_autocmd({ "TextChangedI", "InsertEnter" }, {
+    group = group,
+    callback = function()
+      timer:stop()
+      ui.dismiss()
+    end,
+  })
+  local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
+  vim.on_key(function(_, typed)
+    if typed == esc and ui.visible() and vim.api.nvim_get_mode().mode == "n" then
+      vim.schedule(ui.dismiss)
+    end
+  end, vim.api.nvim_create_namespace("nextedit.esc"))
   vim.api.nvim_create_autocmd("BufLeave", {
     group = group,
     callback = function()
@@ -171,14 +192,17 @@ function M.setup(user_opts)
     end,
   })
 
-  vim.keymap.set({ "i", "n" }, opts.accept_key, function()
+  -- Normal mode only: predictions are cleared on InsertEnter, so an
+  -- insert-mode mapping would never fire and would shadow completion/snippet
+  -- <Tab> mappings for nothing.
+  vim.keymap.set("n", opts.accept_key, function()
     if not ui.accept() then
       -- No prediction pending: pass the key through with its default behavior.
       local key = vim.api.nvim_replace_termcodes(opts.accept_key, true, false, true)
       vim.api.nvim_feedkeys(key, "n", false)
     end
   end, { desc = "nextedit: accept prediction" })
-  vim.keymap.set({ "i", "n" }, opts.dismiss_key, ui.dismiss, { desc = "nextedit: dismiss prediction" })
+  vim.keymap.set("n", opts.dismiss_key, ui.dismiss, { desc = "nextedit: dismiss prediction" })
 
   vim.api.nvim_create_user_command("NextEdit", request_prediction, { desc = "Request a prediction now" })
   vim.api.nvim_create_user_command("NextEditRestart", function()
