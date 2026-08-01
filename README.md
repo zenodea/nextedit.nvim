@@ -16,13 +16,20 @@ so repetitive changes become Tab, Tab, Tab.
 
 ## Features
 
-- **Edit-history-aware predictions**: recent diffs of your buffer are sent as
-  context, which is what makes it "next edit" rather than autocomplete
+- **Edit-history-aware predictions**: your recent edits are coalesced into
+  semantic edits — one entry per rename or change, not per keystroke — and
+  sent as diffs, which is what makes it "next edit" rather than autocomplete
+- **Diagnostics-aware**: errors and warnings near the cursor go into the
+  prompt; a diagnostic where you just edited is the strongest next-edit
+  signal there is
 - **Six provider configurations** — hosted or fully local:
   Anthropic (default), GitHub Copilot, OpenAI, Mercury, Ollama, and Zed's
-  Zeta models
-- **Diff overlay rendering**: lines that would change are highlighted,
-  proposed lines appear below; `<Tab>` accepts, `<C-]>` dismisses
+  Zeta models; chat providers get the exact cursor position, few-shot
+  examples and a schema-validated reply
+- **Diff overlay rendering**: small changes render as word-level inline
+  diffs, larger ones as highlighted lines with the proposed text below;
+  `<Tab>` accepts — or jumps to the edit first when it is far from the
+  cursor — and `<C-]>` dismisses
 - **Fast and non-blocking**: a Rust sidecar keeps HTTP and JSON off the
   editor loop; requests are debounced, and predictions that finish after
   you kept typing are shifted to their new position — they are only
@@ -62,7 +69,7 @@ underneath (`NextEditNew`). Entering insert mode or typing clears it.
 
 | Key / command      | Action                                   |
 | ------------------ | ---------------------------------------- |
-| `<Tab>` (normal mode) | Accept the prediction (falls through to normal `<Tab>` when none is shown) |
+| `<Tab>` (normal mode) | Accept the prediction; when it is more than a few lines away, the first press jumps to it (a `»` sign marks it) and the second applies. Falls through to normal `<Tab>` when none is shown |
 | `<C-]>` / `<Esc>`  | Dismiss the prediction                   |
 | `:NextEdit`        | Request a prediction now                 |
 | `:NextEditRestart` | Restart the server process               |
@@ -163,53 +170,57 @@ override per key): `NEXTEDIT_PROVIDER`, `NEXTEDIT_MODEL`, `NEXTEDIT_API_URL`,
 `NEXTEDIT_API_KEY`, with provider key fallbacks `ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, `INCEPTION_API_KEY`.
 
-Highlights: `NextEditOld` links to `DiffDelete`, `NextEditNew` to `DiffAdd`.
-Override either with `:hi` or `nvim_set_hl`.
+Highlights: `NextEditOld` links to `DiffDelete`, `NextEditNew` to `DiffAdd`,
+`NextEditSign` (the `»` gutter mark) to `DiagnosticSignInfo`. Override any of
+them with `:hi` or `nvim_set_hl`.
 
 ## How it works
 
 The plugin is split in two. On the Lua side, `init.lua` handles autocmds,
-debouncing and keymaps, `diff.lua` keeps a short history of your recent edits
-(`vim.diff` of buffer snapshots), and `ui.lua` renders predictions as
-extmarks. It talks over stdio — one JSON object per line — to a Rust sidecar
-(`server/`) that owns all network traffic, so the editor loop never blocks on
-HTTP; tokio also makes cancelling superseded requests trivial.
+debouncing and keymaps; `diff.lua` keeps a short history of your recent edits
+as `vim.diff` snapshots committed at edit boundaries, merging consecutive
+changes to the same region into one semantic edit; `render.lua` turns a
+prediction into extmarks (word-level inline diffs for small changes, a block
+overlay otherwise) and `ui.lua` shows, applies and jumps to them. It talks
+over stdio — one JSON object per line — to a Rust sidecar (`server/`) that
+owns all network traffic, so the editor loop never blocks on HTTP; tokio also
+makes cancelling superseded requests trivial.
 
 A prediction cycle:
 
 1. At an edit boundary (leaving insert mode, or a normal-mode change) the
    current overlay is dismissed and a debounce timer restarts. Typing in
    insert mode never triggers a request — it only clears the overlay.
-2. When the timer fires, the excerpt around the cursor, the cursor line, and
-   the recent-edit history go to the server. A new request aborts any
+2. When the timer fires, the excerpt around the cursor, the exact cursor
+   position (line and column), the coalesced recent-edit history, and any
+   diagnostics in the excerpt go to the server. A new request aborts any
    in-flight one; the Lua side also drops responses whose id or changedtick
    is stale.
-3. The server prompts the configured provider — structured JSON for
-   Anthropic/OpenAI-style backends, an editable-region rewrite for Zeta —
-   validates the edit against the excerpt, and discards no-ops.
-4. `ui.lua` renders the edit as extmarks. `<Tab>` applies it with
-   `nvim_buf_set_lines`, which fires `TextChanged`, so a follow-up prediction
-   is requested automatically. That is what gives the Tab-Tab-Tab chaining
-   feel.
+3. The server prompts the configured provider — structured JSON with
+   few-shot examples for Anthropic/OpenAI-style backends, an editable-region
+   rewrite for Zeta — validates the edit against the excerpt, and discards
+   no-ops.
+4. `ui.lua` renders the edit as extmarks. `<Tab>` jumps to it if it is far
+   away, then applies it with `nvim_buf_set_lines`, which fires
+   `TextChanged`, so a follow-up prediction is requested automatically. That
+   is what gives the Tab-Tab-Tab chaining feel.
 
 ## Roadmap
 
-- Multi-location jumps: predict a follow-up edit elsewhere in the file with a
-  Tab-to-jump hint, like Cursor
-- Cursor-column tracking for more precise predictions
-- Inline ghost text for pure insertions instead of the line-based overlay
+- Cross-file context: other open buffers in the prompt, so renames propagate
+  across files
+- Treesitter syntax highlighting inside the diff overlay
+- Multiple edits per prediction (a chain of locations from one request)
 - Prompt caching and streaming for lower latency
 - Partial accept (word or line at a time)
 - Incremental edit tracking instead of whole-buffer snapshots
 
 ## Limitations (deliberate, for now)
 
-- Line-based edits only: replacements render below the affected lines rather
-  than as inline ghost text
-- One prediction at a time, near the cursor, no multi-location jumps yet
-- Whole-buffer snapshot per prediction cycle; fine for normal files, wasteful
-  for huge ones
-- No streaming, no caching
+- One prediction at a time, within the excerpt around the cursor
+- Whole-buffer snapshot per commit; fine for normal files, wasteful for huge
+  ones
+- No streaming, no caching, no cross-file context
 
 ## License
 
