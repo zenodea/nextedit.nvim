@@ -67,7 +67,10 @@ end
 
 --- Block marks for one hunk: replaced lines highlighted whole, proposed lines
 --- as virtual lines below (or above, for an insertion before the range).
-local function block_marks(marks, start_row, replacement, ai, ac, bi, bc)
+--- With `above`, changed-line previews render above the change instead, out
+--- from under a completion menu (which always covers the lines below the
+--- cursor).
+local function block_marks(marks, start_row, replacement, ai, ac, bi, bc, above)
   for k = 0, ac - 1 do
     marks[#marks + 1] = { start_row + ai - 1 + k, 0, { line_hl_group = "NextEditOld" } }
   end
@@ -77,7 +80,9 @@ local function block_marks(marks, start_row, replacement, ai, ac, bi, bc)
       local line = replacement[k]
       virt[#virt + 1] = { { line == "" and " " or line, "NextEditNew" } }
     end
-    if ac > 0 then
+    if ac > 0 and above then
+      marks[#marks + 1] = { start_row + ai - 1, 0, { virt_lines = virt, virt_lines_above = true } }
+    elseif ac > 0 then
       marks[#marks + 1] = { start_row + ai - 1 + ac - 1, 0, { virt_lines = virt } }
     elseif ai == 0 then
       marks[#marks + 1] = { start_row, 0, { virt_lines = virt, virt_lines_above = true } }
@@ -88,8 +93,9 @@ local function block_marks(marks, start_row, replacement, ai, ac, bi, bc)
 end
 
 --- Extmark specs ({row, col, opts}, 0-indexed) rendering `replacement` over
---- the buffer lines `original` that start at `start_row`.
-function M.extmarks(original, replacement, start_row)
+--- the buffer lines `original` that start at `start_row`. `above` flips
+--- block previews to render above the change.
+function M.extmarks(original, replacement, start_row, above)
   local a = table.concat(original, "\n")
   local b = table.concat(replacement, "\n")
   local hunks = vim.diff(a == "" and a or a .. "\n", b == "" and b or b .. "\n", {
@@ -117,7 +123,7 @@ function M.extmarks(original, replacement, start_row)
     if inline then
       vim.list_extend(marks, inline)
     else
-      block_marks(marks, start_row, replacement, ai, ac, bi, bc)
+      block_marks(marks, start_row, replacement, ai, ac, bi, bc, above)
     end
   end
   return marks

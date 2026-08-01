@@ -209,6 +209,10 @@ function M.setup(user_opts)
       end,
     })
     vim.api.nvim_create_autocmd("InsertEnter", { group = group, callback = ui.dismiss })
+    -- While a completion menu is open the preview renders above the change;
+    -- when the menu closes without a text change, move it back below.
+    -- (Accepting a completion fires TextChangedI, which re-requests anyway.)
+    vim.api.nvim_create_autocmd("CompleteDone", { group = group, callback = ui.refresh })
   else
     vim.api.nvim_create_autocmd({ "TextChangedI", "InsertEnter" }, {
       group = group,
