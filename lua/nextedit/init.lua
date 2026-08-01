@@ -165,6 +165,7 @@ function M.setup(user_opts)
 
   vim.api.nvim_set_hl(0, "NextEditOld", { default = true, link = "DiffDelete" })
   vim.api.nvim_set_hl(0, "NextEditNew", { default = true, link = "DiffAdd" })
+  vim.api.nvim_set_hl(0, "NextEditSign", { default = true, link = "DiagnosticSignInfo" })
 
   if not server.start(opts.server_cmd or default_server_cmd(), server_env()) then
     return
