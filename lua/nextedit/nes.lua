@@ -52,16 +52,28 @@ function M.client_for(buf)
   end
 end
 
---- Locate copilot-language-server: on PATH
---- (`npm install -g @github/copilot-language-server`) or a mason install.
-function M.binary()
+--- Command to run copilot-language-server, checking in order: PATH
+--- (`npm install -g @github/copilot-language-server`), a mason install, and
+--- the server bundled with an installed copilot.lua — so listing copilot.lua
+--- as a plugin dependency is enough, without ever calling its setup().
+function M.server_cmd()
   local exe = vim.fn.exepath("copilot-language-server")
   if exe ~= "" then
-    return exe
+    return { exe, "--stdio" }
   end
   local mason = vim.fn.stdpath("data") .. "/mason/bin/copilot-language-server"
   if vim.fn.executable(mason) == 1 then
-    return mason
+    return { mason, "--stdio" }
+  end
+  -- copilot.lua's native binary (if it ever downloaded one), then the JS
+  -- server it always bundles (needs node 22+).
+  local native = vim.api.nvim_get_runtime_file("copilot/*/copilot-language-server", false)[1]
+  if native and vim.fn.executable(native) == 1 then
+    return { native, "--stdio" }
+  end
+  local js = vim.api.nvim_get_runtime_file("copilot/js/language-server.js", false)[1]
+  if js and vim.fn.executable("node") == 1 then
+    return { "node", js, "--stdio" }
   end
 end
 
@@ -82,13 +94,13 @@ function M.attach(buf)
     if running then
       vim.lsp.buf_attach_client(buf, running.id)
     else
-      local bin = M.binary()
-      if not bin then
+      local cmd = M.server_cmd()
+      if not cmd then
         return -- :checkhealth nextedit explains how to install it
       end
       vim.lsp.start({
         name = "copilot-ls",
-        cmd = { bin, "--stdio" },
+        cmd = cmd,
         root_dir = vim.fs.root(buf, { ".git" }) or vim.uv.cwd(),
         init_options = {
           editorInfo = { name = "Neovim", version = tostring(vim.version()) },

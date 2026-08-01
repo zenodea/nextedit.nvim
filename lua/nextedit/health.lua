@@ -47,14 +47,14 @@ function M.check()
     if client then
       h.ok("Copilot LSP client running: " .. client.name)
     else
-      local bin = require("nextedit.nes").binary()
-      if bin then
-        h.ok("copilot-language-server found: " .. bin .. " (starts on demand)")
+      local cmd = require("nextedit.nes").server_cmd()
+      if cmd then
+        h.ok("copilot-language-server found: " .. table.concat(cmd, " ") .. " (starts on demand)")
       else
         h.error("copilot-language-server not found", {
-          "npm install -g @github/copilot-language-server",
+          "add zbirenbaum/copilot.lua as a plugin dependency (its bundled server is used; needs node 22+)",
+          "or npm install -g @github/copilot-language-server",
           "or :MasonInstall copilot-language-server",
-          "(a running copilot.lua client would also be reused)",
         })
       end
     end

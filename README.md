@@ -106,14 +106,26 @@ Notes:
 - **copilot-nes** uses GitHub's purpose-trained Next Edit Suggestions model
   by talking LSP to `copilot-language-server` — the same backend
   sidekick.nvim and VS Code use, and the only provider here running a model
-  actually trained for next-edit prediction. No plugin dependency: a running
-  Copilot client (say, copilot.lua's) is reused when present, otherwise the
-  server is started directly — install it with
-  `npm install -g @github/copilot-language-server` or
-  `:MasonInstall copilot-language-server`. Sign in once with
-  `:NextEditSignIn` (any existing Copilot sign-in also counts). The Rust
-  sidecar, prompt pipeline and edit history are all bypassed — Copilot
-  tracks your edits server-side.
+  actually trained for next-edit prediction. The easiest setup is listing
+  copilot.lua as a plugin dependency — its bundled language server is found
+  and started automatically, no copilot.lua `setup()` needed (node 22+):
+
+  ```lua
+  {
+    "zenodea/nextedit.nvim",
+    dependencies = { "zbirenbaum/copilot.lua" },
+    config = function()
+      require("nextedit").setup({ provider = "copilot-nes" })
+    end,
+  }
+  ```
+
+  Alternatively `npm install -g @github/copilot-language-server` or
+  `:MasonInstall copilot-language-server` — and if a Copilot LSP client is
+  already running (a configured copilot.lua), it is simply reused. Sign in
+  once with `:NextEditSignIn` (any existing Copilot sign-in also counts).
+  The Rust sidecar, prompt pipeline and edit history are all bypassed —
+  Copilot tracks your edits server-side.
 - **mercury** is Inception Labs' diffusion coder; at ~1000 tok/s it is a
   particularly good latency fit for edit prediction. `mercury-2` is a reasoning
   model, so requests ask for `reasoning_effort: instant` — left at the default
