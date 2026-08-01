@@ -3,6 +3,7 @@ mod copilot;
 mod openai;
 mod zeta;
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -77,17 +78,74 @@ pub(crate) const FORMAT_INSTRUCTIONS: &str = "\n\nRespond with only a JSON objec
 where replacement is the full new text for the replaced lines, newline-separated, \
 and an empty string deletes them. No prose, no code fences.";
 
+/// Two worked examples sent as prior conversation turns: a rename propagated
+/// to its call site (the canonical next edit) and a confident no-edit. They
+/// anchor the output shape and make "no edit" a real option; the user halves
+/// are rendered by `user_prompt` itself so they can never drift from the live
+/// prompt format.
+pub(crate) fn examples() -> &'static [(String, String)] {
+    static EXAMPLES: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    EXAMPLES.get_or_init(|| {
+        let lines = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let rename = PredictParams {
+            path: "src/user.py".into(),
+            filetype: "python".into(),
+            cursor_line: 12,
+            cursor_col: 14,
+            excerpt_start: 12,
+            excerpt_lines: lines(&[
+                "def fetch_user(id):",
+                "    return db.lookup(id)",
+                "",
+                "def handler(req):",
+                "    user = get_user(req.id)",
+                "    return render(user)",
+            ]),
+            recent_edits: vec![
+                "@@ -12,2 +12,2 @@\n-def get_user(id):\n+def fetch_user(id):\n     return db.lookup(id)\n".into(),
+            ],
+            diagnostics: vec!["line 16 [ERROR]: undefined name 'get_user'".into()],
+        };
+        let rename_edit = "{\"has_edit\": true, \"start_line\": 16, \"end_line\": 16, \
+             \"replacement\": \"    user = fetch_user(req.id)\"}";
+        let complete = PredictParams {
+            path: "src/circle.py".into(),
+            filetype: "python".into(),
+            cursor_line: 4,
+            cursor_col: 27,
+            excerpt_start: 1,
+            excerpt_lines: lines(&[
+                "import math",
+                "",
+                "def area(r):",
+                "    return math.pi * r ** 2",
+            ]),
+            recent_edits: vec![
+                "@@ -3,1 +3,2 @@\n def area(r):\n+    return math.pi * r ** 2\n".into(),
+            ],
+            diagnostics: vec![],
+        };
+        let no_edit =
+            "{\"has_edit\": false, \"start_line\": 0, \"end_line\": 0, \"replacement\": \"\"}";
+        vec![
+            (user_prompt(&rename), rename_edit.to_string()),
+            (user_prompt(&complete), no_edit.to_string()),
+        ]
+    })
+}
+
 /// Request body for an OpenAI-style chat completions call. Only universally
 /// supported fields: reasoning-model endpoints reject max_tokens and
 /// non-default temperature.
 pub(crate) fn chat_body(model: &str, p: &PredictParams) -> serde_json::Value {
-    json!({
-        "model": model,
-        "messages": [
-            { "role": "system", "content": format!("{SYSTEM_PROMPT}{FORMAT_INSTRUCTIONS}") },
-            { "role": "user", "content": user_prompt(p) },
-        ],
-    })
+    let mut messages =
+        vec![json!({ "role": "system", "content": format!("{SYSTEM_PROMPT}{FORMAT_INSTRUCTIONS}") })];
+    for (user, assistant) in examples() {
+        messages.push(json!({ "role": "user", "content": user }));
+        messages.push(json!({ "role": "assistant", "content": assistant }));
+    }
+    messages.push(json!({ "role": "user", "content": user_prompt(p) }));
+    json!({ "model": model, "messages": messages })
 }
 
 /// Pull the assistant text out of an OpenAI-style chat completions response.
@@ -210,6 +268,27 @@ pub(crate) fn parse_model_edit(text: &str) -> Result<ModelEdit> {
         }
     }
     bail!("model output contained no JSON object")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_marker_clamps_and_respects_char_boundaries() {
+        assert_eq!(insert_marker("abc", 1, "|"), "a|bc");
+        assert_eq!(insert_marker("abc", 99, "|"), "abc|");
+        assert_eq!(insert_marker("héllo", 2, "|"), "h|éllo"); // 2 is inside the 'é'
+    }
+
+    #[test]
+    fn examples_render_in_the_live_prompt_format() {
+        let ex = examples();
+        assert_eq!(ex.len(), 2);
+        assert!(ex[0].0.contains(CURSOR_MARKER));
+        assert!(ex[0].0.contains("Diagnostics in the excerpt:"));
+        assert!(ex[1].1.contains("\"has_edit\": false"));
+    }
 }
 
 /// Clamp the model's edit to the excerpt and drop no-ops.

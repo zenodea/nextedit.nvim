@@ -4,7 +4,7 @@ use serde_json::json;
 
 use crate::protocol::{PredictParams, Prediction};
 
-use super::{edit_schema, http_client, user_prompt, validate, ModelEdit, SYSTEM_PROMPT};
+use super::{edit_schema, examples, http_client, user_prompt, validate, ModelEdit, SYSTEM_PROMPT};
 
 const DEFAULT_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const DEFAULT_MODEL: &str = "claude-haiku-4-5";
@@ -27,11 +27,17 @@ impl Anthropic {
     }
 
     pub async fn predict(&self, p: &PredictParams) -> Result<Prediction> {
+        let mut messages = Vec::new();
+        for (user, assistant) in examples() {
+            messages.push(json!({ "role": "user", "content": user }));
+            messages.push(json!({ "role": "assistant", "content": assistant }));
+        }
+        messages.push(json!({ "role": "user", "content": user_prompt(p) }));
         let body = json!({
             "model": self.model,
             "max_tokens": 1024,
             "system": SYSTEM_PROMPT,
-            "messages": [{ "role": "user", "content": user_prompt(p) }],
+            "messages": messages,
             "output_config": { "format": { "type": "json_schema", "schema": edit_schema() } },
         });
         let resp = self
