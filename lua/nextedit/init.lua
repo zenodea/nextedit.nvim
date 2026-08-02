@@ -296,7 +296,7 @@ function M.setup(user_opts)
   local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
   vim.on_key(function(_, typed)
     if typed == esc and ui.visible() and vim.api.nvim_get_mode().mode == "n" then
-      vim.schedule(ui.dismiss)
+      vim.schedule(ui.reject)
     end
   end, vim.api.nvim_create_namespace("nextedit.esc"))
   vim.api.nvim_create_autocmd("BufLeave", {
@@ -325,7 +325,7 @@ function M.setup(user_opts)
       vim.api.nvim_feedkeys(key, "n", false)
     end
   end, { desc = "nextedit: accept prediction" })
-  vim.keymap.set(modes, opts.dismiss_key, ui.dismiss, { desc = "nextedit: dismiss prediction" })
+  vim.keymap.set(modes, opts.dismiss_key, ui.reject, { desc = "nextedit: dismiss prediction" })
 
   vim.api.nvim_create_user_command("NextEdit", request_prediction, { desc = "Request a prediction now" })
   vim.api.nvim_create_user_command("NextEditRestart", function()
