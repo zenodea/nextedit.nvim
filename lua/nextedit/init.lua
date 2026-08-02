@@ -348,6 +348,7 @@ function M.setup(user_opts)
   vim.api.nvim_create_autocmd("TextChanged", {
     group = group,
     callback = function(ev)
+      ui.check_undo(ev.buf) -- undoing an accepted prediction rejects it
       ui.dismiss()
       if enabled(ev.buf) then
         diff.commit(ev.buf)

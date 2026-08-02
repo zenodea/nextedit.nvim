@@ -160,6 +160,16 @@ ui.show(0, pred, vim.b[0].changedtick)
 check("reject: shows again once the line changed", ui.visible(), true)
 ui.dismiss()
 
+-- 4b. Undoing an accepted prediction rejects it.
+reset_buffer()
+local upred = { start_line = 4, end_line = 4, replacement = { "def sub(u):" } }
+ui.show(0, upred, vim.b[0].changedtick)
+check("undo-reject: accepted", ui.accept(), true)
+vim.api.nvim_buf_set_lines(0, 3, 4, false, { "def sub(a, b):" }) -- as `u` would
+ui.check_undo(0)
+ui.show(0, upred, vim.b[0].changedtick)
+check("undo-reject: undone suggestion is suppressed", ui.visible(), false)
+
 -- 5. Cursor far from the prediction: first accept jumps, second applies.
 reset_buffer()
 vim.api.nvim_buf_set_lines(0, 5, 5, false, { "", "# 7", "# 8", "# 9", "# 10", "# 11", "# 12" })
