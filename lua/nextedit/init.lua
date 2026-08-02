@@ -17,6 +17,9 @@ local defaults = {
   accept_key = "<Tab>",
   dismiss_key = "<C-]>",
   server_cmd = nil, -- defaults to the bundled Rust binary
+  filetypes = { gitcommit = false, gitrebase = false, help = false }, -- per-filetype toggle; unlisted filetypes are enabled
+  deny_paths = { "%.env", "%.pem$", "secret", "credential" }, -- never predict in files matching these Lua patterns
+  max_lines = 10000, -- skip buffers larger than this (whole-buffer snapshots get expensive)
   provider = nil, -- "anthropic" (default), "copilot", "copilot-nes", "openai", "mercury", "gemini", "xai", "mistral", "openrouter", "ollama" or "zeta"
   model = nil, -- provider-specific model name
   api_url = nil, -- override the provider's endpoint, e.g. a local llama.cpp server
@@ -98,6 +101,28 @@ local function remap_and_show(buf, params, result)
   }, vim.b[buf].changedtick)
 end
 
+--- Whether predictions should run in this buffer at all: real file buffers
+--- only, minus disabled filetypes, denied paths (secrets should never reach
+--- an API) and oversized files.
+local function enabled(buf)
+  if not vim.api.nvim_buf_is_valid(buf) or vim.bo[buf].buftype ~= "" then
+    return false
+  end
+  if opts.filetypes[vim.bo[buf].filetype] == false then
+    return false
+  end
+  if vim.api.nvim_buf_line_count(buf) > opts.max_lines then
+    return false
+  end
+  local path = vim.api.nvim_buf_get_name(buf):lower()
+  for _, pat in ipairs(opts.deny_paths) do
+    if path:find(pat) then
+      return false
+    end
+  end
+  return true
+end
+
 --- Error and warning diagnostics inside the excerpt, formatted for the
 --- prompt. An LSP error where the user just edited is the strongest "next
 --- edit" signal there is.
@@ -118,7 +143,7 @@ end
 
 local function request_prediction()
   local buf = vim.api.nvim_get_current_buf()
-  if not vim.api.nvim_buf_is_valid(buf) or vim.bo[buf].buftype ~= "" then
+  if not enabled(buf) then
     return
   end
   -- One request at a time: let the in-flight one finish (its response can be
@@ -221,6 +246,11 @@ end
 
 function M.setup(user_opts)
   opts = vim.tbl_deep_extend("force", defaults, user_opts or {})
+  -- A user deny_paths list replaces the default outright; index-wise deep
+  -- merging of lists produces nonsense.
+  if user_opts and user_opts.deny_paths then
+    opts.deny_paths = user_opts.deny_paths
+  end
 
   vim.api.nvim_set_hl(0, "NextEditOld", { default = true, link = "DiffDelete" })
   vim.api.nvim_set_hl(0, "NextEditNew", { default = true, link = "DiffAdd" })
@@ -255,16 +285,20 @@ function M.setup(user_opts)
     group = group,
     pattern = "i*:n",
     callback = function(ev)
-      diff.commit(ev.buf)
-      schedule_prediction()
+      if enabled(ev.buf) then
+        diff.commit(ev.buf)
+        schedule_prediction()
+      end
     end,
   })
   vim.api.nvim_create_autocmd("TextChanged", {
     group = group,
     callback = function(ev)
       ui.dismiss()
-      diff.commit(ev.buf)
-      schedule_prediction()
+      if enabled(ev.buf) then
+        diff.commit(ev.buf)
+        schedule_prediction()
+      end
     end,
   })
   local provider = opts.provider or vim.env.NEXTEDIT_PROVIDER or "anthropic"
