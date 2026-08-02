@@ -77,9 +77,19 @@ function M.show(buf, pred, tick)
     end_line = pred.end_line,
     replacement = pred.replacement,
     on_accept = pred.on_accept,
+    hint_buf = pred.hint_buf,
     tick = tick,
     jump_pos = { marks[1][1] + 1, marks[1][2] },
   }
+  -- A cross-buffer prediction is invisible from where the user sits; leave a
+  -- hint at their cursor line pointing at the file it lives in.
+  if pred.hint_buf and pred.hint_buf ~= buf and vim.api.nvim_win_get_buf(0) == pred.hint_buf then
+    local lnum = vim.api.nvim_win_get_cursor(0)[1]
+    vim.api.nvim_buf_set_extmark(pred.hint_buf, ns, lnum - 1, 0, {
+      virt_text = { { "» edit in " .. vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ":t"), "NextEditSign" } },
+      virt_text_pos = "eol",
+    })
+  end
 end
 
 function M.visible()
@@ -96,6 +106,7 @@ function M.refresh()
       end_line = c.end_line,
       replacement = c.replacement,
       on_accept = c.on_accept,
+      hint_buf = c.hint_buf,
     }, c.tick)
   end
 end
@@ -105,7 +116,15 @@ function M.dismiss()
     return
   end
   vim.api.nvim_buf_clear_namespace(current.buf, ns, 0, -1)
+  if current.hint_buf and vim.api.nvim_buf_is_valid(current.hint_buf) then
+    vim.api.nvim_buf_clear_namespace(current.hint_buf, ns, 0, -1)
+  end
   current = nil
+end
+
+--- The buffer holding the pending prediction, or nil.
+function M.buffer()
+  return current and current.buf
 end
 
 --- Explicit user dismissal: like dismiss(), but remember the suggestion so
@@ -148,6 +167,12 @@ function M.accept()
       pcall(vim.api.nvim_win_set_cursor, win, c.jump_pos)
       return true
     end
+  else
+    -- The prediction lives in another buffer: first accept goes there.
+    vim.cmd("normal! m'")
+    vim.api.nvim_win_set_buf(win, c.buf)
+    pcall(vim.api.nvim_win_set_cursor, win, c.jump_pos)
+    return true
   end
   M.dismiss()
   vim.api.nvim_buf_set_lines(c.buf, c.start_line - 1, c.end_line, false, c.replacement)

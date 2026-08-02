@@ -72,6 +72,14 @@ vim.api.nvim_buf_set_lines(rbuf, 0, -1, false, rlines)
 local redit = { { path = "f.py", diff = "@@ -1,1 +1,1 @@\n-def get_user(id):\n+def fetch_user(id):" } }
 local found = regionsmod.find(rbuf, redit, 1, 4)
 check("regions: finds the stale call site", #found, 1)
+local xbuf = vim.api.nvim_create_buf(true, false)
+vim.api.nvim_buf_set_name(xbuf, "xtest.py")
+vim.api.nvim_buf_set_lines(xbuf, 0, -1, false, { "print(get_user(2))" })
+local found2 = regionsmod.find(rbuf, redit, 1, 4)
+check("regions: finds sites in other listed buffers", #found2, 2)
+check("regions: cross-buffer region carries its own path and bufnr",
+  found2[2].path:match("xtest%.py$") ~= nil and found2[2].bufnr == xbuf, true)
+vim.api.nvim_buf_delete(xbuf, { force = true })
 check("regions: region covers the occurrence", found[1].start <= 13
   and found[1].start + #found[1].lines - 1 >= 13, true)
 check("regions: nothing without stale tokens",
@@ -161,6 +169,20 @@ check("jump: first accept jumps instead of applying", ui.accept(), true)
 check("jump: cursor lands on the edit", vim.api.nvim_win_get_cursor(0)[1], 4)
 check("jump: second accept applies", ui.accept(), true)
 check("jump: line 4 replaced", vim.api.nvim_buf_get_lines(0, 3, 4, false), { "def sub(a: int, b: int) -> int:" })
+
+-- 6. Cross-buffer prediction: first accept switches buffer, second applies.
+reset_buffer()
+local origin = vim.api.nvim_get_current_buf()
+local other = vim.api.nvim_create_buf(true, false)
+vim.api.nvim_buf_set_lines(other, 0, -1, false, { "alpha", "beta", "gamma" })
+ui.show(other, { start_line = 2, end_line = 2, replacement = { "BETA" }, hint_buf = origin },
+  vim.b[other].changedtick)
+check("crossbuf: prediction visible", ui.visible(), true)
+check("crossbuf: first accept switches to the buffer", ui.accept(), true)
+check("crossbuf: prediction survives the switch", ui.visible(), true)
+check("crossbuf: current buffer is the target", vim.api.nvim_get_current_buf(), other)
+check("crossbuf: second accept applies", ui.accept(), true)
+check("crossbuf: line replaced", vim.api.nvim_buf_get_lines(other, 1, 2, false), { "BETA" })
 
 if failures > 0 then
   print(failures .. " failure(s)")

@@ -35,6 +35,8 @@ pub struct PredictParams {
 
 #[derive(Deserialize)]
 pub struct Region {
+    /// File the region belongs to; possibly not the current one.
+    pub path: String,
     /// Absolute 1-indexed line number of `lines[0]`.
     pub start: usize,
     pub lines: Vec<String>,
@@ -65,10 +67,13 @@ pub struct Prediction {
     pub start_line: usize,
     pub end_line: usize,
     pub replacement: Vec<String>,
+    /// File the edit targets; None means the request's current file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 impl Prediction {
     pub fn none() -> Self {
-        Prediction { has_edit: false, start_line: 0, end_line: 0, replacement: vec![] }
+        Prediction { has_edit: false, start_line: 0, end_line: 0, replacement: vec![], path: None }
     }
 }
