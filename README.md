@@ -81,9 +81,13 @@ Or with Copilot's native next-edit model, no Rust build required:
 
 Just edit. Predictions are requested when you leave insert mode or make a
 normal-mode change. With fast providers (mercury, ollama, zeta) they are
-also requested as you type; see the `trigger` option. After a short debounce
-the overlay appears: replaced lines are highlighted, proposed text shows
-inline or below.
+also requested as you type; see the `trigger` option. Moving the cursor or
+idling (after 'updatetime') triggers a request too, but only when there is
+something to reason from: recent edits or a nearby diagnostic. So navigating
+to a place your last change made relevant can surface a suggestion without
+any new edit. Identical contexts are never requested twice. After a short
+debounce the overlay appears: replaced lines are highlighted, proposed text
+shows inline or below.
 
 | Key / command | Action |
 | ------------- | ------ |

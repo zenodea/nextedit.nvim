@@ -32,6 +32,7 @@ local opts
 local timer = vim.uv.new_timer()
 local inflight = nil -- { buf, sent_at }
 local rerequest = false -- a request came in while one was in flight
+local last_fingerprint = nil -- context of the last dispatched request
 local INFLIGHT_TIMEOUT_MS = 10000
 local last_error = nil
 local error_notified = false
@@ -185,9 +186,24 @@ local function excerpt_diagnostics(buf, first, last)
   return out
 end
 
-local function request_prediction()
+--- kind: nil for edit-triggered requests, "movement" for cursor-move/idle
+--- ones (which need existing signal and never replace a visible prediction),
+--- "manual" for :NextEdit (which skips the duplicate-context check).
+local function request_prediction(kind)
   local buf = vim.api.nvim_get_current_buf()
   if not enabled(buf) then
+    return
+  end
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local cursor_line = cursor[1]
+  local first = math.max(1, cursor_line - opts.context_lines)
+  local last = math.min(vim.api.nvim_buf_line_count(buf), cursor_line + opts.context_lines)
+  local recent_edits = diff.take(buf)
+  local diagnostics = excerpt_diagnostics(buf, first, last)
+  -- Movement gives the model nothing new by itself: only ask when there is
+  -- recent-edit or diagnostic signal to reason from, and never while a
+  -- prediction is already on screen.
+  if kind == "movement" and (ui.visible() or (#recent_edits == 0 and #diagnostics == 0)) then
     return
   end
   -- One request at a time: let the in-flight one finish (its response can be
@@ -203,6 +219,10 @@ local function request_prediction()
   -- the excerpt/remap machinery are not involved (responses are tied to a
   -- document version, so stale ones are dropped rather than remapped).
   if opts.provider == "copilot-nes" then
+    local fingerprint = ("nes:%d:%d:%d"):format(buf, cursor_line, vim.b[buf].changedtick)
+    if kind ~= "manual" and fingerprint == last_fingerprint then
+      return
+    end
     local sent = nes.request(buf, function(result, err)
       inflight = nil
       if err then
@@ -220,13 +240,10 @@ local function request_prediction()
     end)
     if sent then
       inflight = { buf = buf, sent_at = vim.uv.now() }
+      last_fingerprint = fingerprint
     end
     return
   end
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local cursor_line = cursor[1]
-  local first = math.max(1, cursor_line - opts.context_lines)
-  local last = math.min(vim.api.nvim_buf_line_count(buf), cursor_line + opts.context_lines)
   local params = {
     path = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ":."),
     filetype = vim.bo[buf].filetype,
@@ -234,8 +251,8 @@ local function request_prediction()
     cursor_col = cursor[2],
     excerpt_start = first,
     excerpt_lines = vim.api.nvim_buf_get_lines(buf, first - 1, last, false),
-    recent_edits = diff.take(buf),
-    diagnostics = excerpt_diagnostics(buf, first, last),
+    recent_edits = recent_edits,
+    diagnostics = diagnostics,
     outline = outline.get(buf),
   }
   -- Candidate sites the recent edits point at, in this file or another open
@@ -246,6 +263,19 @@ local function request_prediction()
   for _, r in ipairs(found) do
     targets[r.path] = r.bufnr
     params.extra_regions[#params.extra_regions + 1] = { path = r.path, start = r.start, lines = r.lines }
+  end
+  -- Identical context produces an identical prediction: skip the round trip.
+  -- The cursor column is left out so wandering along a line never refires.
+  local fingerprint = table.concat({
+    params.path,
+    tostring(cursor_line),
+    table.concat(params.excerpt_lines, "\n"),
+    vim.json.encode(params.recent_edits),
+    table.concat(params.diagnostics, "\n"),
+    vim.json.encode(params.extra_regions),
+  }, "\0")
+  if kind ~= "manual" and fingerprint == last_fingerprint then
+    return
   end
   track.begin(buf)
   local id = server.predict(params, function(result, err)
@@ -269,14 +299,17 @@ local function request_prediction()
   end)
   if id then
     inflight = { buf = buf, sent_at = vim.uv.now() }
+    last_fingerprint = fingerprint
   else
     track.finish(buf)
   end
 end
 
-local function schedule_prediction()
+local function schedule_prediction(kind)
   timer:stop()
-  timer:start(opts.debounce_ms, 0, vim.schedule_wrap(request_prediction))
+  timer:start(opts.debounce_ms, 0, vim.schedule_wrap(function()
+    request_prediction(kind)
+  end))
 end
 
 --- Introspection for :checkhealth; nil until setup() has run.
@@ -382,6 +415,17 @@ function M.setup(user_opts)
       end,
     })
   end
+  -- Movement and idle also trigger, so suggestions appear where you look,
+  -- not only where you type. request_prediction gates these on existing
+  -- signal, and the fingerprint check keeps repeat contexts free.
+  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorHold" }, {
+    group = group,
+    callback = function(ev)
+      if enabled(ev.buf) and not ui.visible() then
+        schedule_prediction("movement")
+      end
+    end,
+  })
   local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
   vim.on_key(function(_, typed)
     if typed == esc and ui.visible() and vim.api.nvim_get_mode().mode == "n" then
@@ -421,7 +465,9 @@ function M.setup(user_opts)
   end, { desc = "nextedit: accept prediction" })
   vim.keymap.set(modes, opts.dismiss_key, ui.reject, { desc = "nextedit: dismiss prediction" })
 
-  vim.api.nvim_create_user_command("NextEdit", request_prediction, { desc = "Request a prediction now" })
+  vim.api.nvim_create_user_command("NextEdit", function()
+    request_prediction("manual")
+  end, { desc = "Request a prediction now" })
   vim.api.nvim_create_user_command("NextEditRestart", function()
     if opts.provider == "copilot-nes" then
       vim.notify("nextedit: copilot-nes uses the Copilot LSP client; restart that instead (:LspRestart)", vim.log.levels.INFO)
