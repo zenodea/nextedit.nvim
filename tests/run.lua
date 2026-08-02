@@ -59,6 +59,24 @@ check("outline: finds both functions", #o, 2)
 check("outline: entries carry absolute line numbers",
   o[2]:match("^%s*4|") ~= nil and o[2]:match("bar") ~= nil, true)
 
+-- Regions: occurrences of identifiers the recent edits removed become extra
+-- editable regions outside the excerpt.
+local regionsmod = require("nextedit.regions")
+local rbuf = vim.api.nvim_create_buf(false, true)
+local rlines = { "def fetch_user(id):", "    return db.lookup(id)" }
+for _ = 1, 10 do
+  rlines[#rlines + 1] = ""
+end
+rlines[#rlines + 1] = "user = get_user(7)"
+vim.api.nvim_buf_set_lines(rbuf, 0, -1, false, rlines)
+local redit = { { path = "f.py", diff = "@@ -1,1 +1,1 @@\n-def get_user(id):\n+def fetch_user(id):" } }
+local found = regionsmod.find(rbuf, redit, 1, 4)
+check("regions: finds the stale call site", #found, 1)
+check("regions: region covers the occurrence", found[1].start <= 13
+  and found[1].start + #found[1].lines - 1 >= 13, true)
+check("regions: nothing without stale tokens",
+  #regionsmod.find(rbuf, { { path = "f.py", diff = "@@ -1 +1 @@\n-x\n+y" } }, 1, 4), 0)
+
 -- Rendering: small word changes are inline, rewrites fall back to block style.
 local render = require("nextedit.render")
 local inline = render.extmarks({ "local foo = 1" }, { "local bar = 1" }, 10)

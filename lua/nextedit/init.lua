@@ -1,6 +1,7 @@
 local diff = require("nextedit.diff")
 local nes = require("nextedit.nes")
 local outline = require("nextedit.outline")
+local regions = require("nextedit.regions")
 local server = require("nextedit.server")
 local track = require("nextedit.track")
 local ui = require("nextedit.ui")
@@ -75,7 +76,26 @@ local function default_server_cmd()
   return { target .. "release/nextedit-server" } -- let server.start report the error
 end
 
---- The prediction targeted the excerpt as it was when the request was sent;
+--- The lines [s, e] as they were sent to the model, from whichever region
+--- (excerpt or extra) contains the whole range.
+local function sent_lines(params, s, e)
+  local function slice(start, lines)
+    if s >= start and e <= start + #lines - 1 then
+      local out = {}
+      for i = s, e do
+        out[#out + 1] = lines[i - start + 1]
+      end
+      return out
+    end
+  end
+  local got = slice(params.excerpt_start, params.excerpt_lines)
+  for _, r in ipairs(params.extra_regions or {}) do
+    got = got or slice(r.start, r.lines)
+  end
+  return got
+end
+
+--- The prediction targeted the buffer as it was when the request was sent;
 --- shift it across the edits made since, and show it only if the lines it
 --- replaces are still exactly what the model saw.
 local function remap_and_show(buf, params, result)
@@ -87,9 +107,9 @@ local function remap_and_show(buf, params, result)
   if not start_line then
     return
   end
-  local original = {}
-  for i = result.start_line, result.end_line do
-    original[#original + 1] = params.excerpt_lines[i - params.excerpt_start + 1]
+  local original = sent_lines(params, result.start_line, result.end_line)
+  if not original then
+    return
   end
   local current = vim.api.nvim_buf_get_lines(buf, start_line - 1, end_line, false)
   if not vim.deep_equal(current, original) then
@@ -195,6 +215,9 @@ local function request_prediction()
     diagnostics = excerpt_diagnostics(buf, first, last),
     outline = outline.get(buf),
   }
+  -- Candidate sites elsewhere in the file that the recent edits point at;
+  -- lets the prediction land far from the cursor, with tab-to-jump.
+  params.extra_regions = regions.find(buf, params.recent_edits, first, last)
   track.begin(buf)
   local id = server.predict(params, function(result, err)
     vim.schedule(function()

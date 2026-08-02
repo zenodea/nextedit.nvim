@@ -27,6 +27,17 @@ pub struct PredictParams {
     /// Numbered definition lines outlining the whole file, pre-formatted.
     #[serde(default)]
     pub outline: Vec<String>,
+    /// Extra editable regions elsewhere in the file (candidate sites for the
+    /// next edit, found by scanning for identifiers the recent edits removed).
+    #[serde(default)]
+    pub extra_regions: Vec<Region>,
+}
+
+#[derive(Deserialize)]
+pub struct Region {
+    /// Absolute 1-indexed line number of `lines[0]`.
+    pub start: usize,
+    pub lines: Vec<String>,
 }
 
 #[derive(Deserialize)]
