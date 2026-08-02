@@ -1,60 +1,54 @@
 # nextedit.nvim
 
-Cursor-style next-edit prediction for Neovim. When you finish an edit, it
-predicts the edit you are about to make next — based on what you have *been*
-editing, not just the text at the cursor — and shows it as a diff overlay you
-accept with `<Tab>`.
+Next-edit prediction for Neovim, in the style of Cursor and Zed. The plugin
+watches the edits you make and predicts the one you are about to make next.
+The prediction shows up as a diff overlay you accept with `<Tab>`.
 
-Classic completion plugins guess the text that continues at your cursor.
-Next-edit prediction watches the *changes* you make instead. Rename a
-variable, and it offers the same rename at the next usage. Change a function
-signature, and it offers to fix the call sites nearby. With chat providers,
-predictions are requested at edit boundaries — when you leave insert mode or
-make a normal-mode change — so the model always reasons about a completed
-edit; with fast edit-prediction providers (Mercury, Ollama, Zeta) they are
-also requested as you type. Accepting an edit requests the next prediction
-automatically, so repetitive changes become Tab, Tab, Tab.
+Completion plugins guess the text that continues at your cursor. Next-edit
+prediction is a different thing: it reasons about your recent changes. Rename
+a function and it offers the same rename at the remaining call sites, in the
+same file or in another open buffer. Change a signature and it offers to fix
+the callers. Accepting an edit requests the next one, so a repetitive change
+becomes Tab, Tab, Tab.
 
-## Features
+## What it does
 
-- **Edit-history-aware predictions**: your recent edits — across *all* open
-  buffers — are coalesced into semantic edits, one entry per rename or
-  change, not per keystroke, and sent as diffs; that is what makes it "next
-  edit" rather than autocomplete, and what lets a rename in one file fix
-  call sites in another
-- **Whole-file reach**: a treesitter outline shows the model the file's
-  structure, and lines still containing identifiers your edits removed are
-  sent as extra editable regions — predictions can land far from the
-  cursor, marked with a `»` sign and reached with tab-to-jump
-- **Respects your no**: explicitly dismissed suggestions are remembered and
-  not re-proposed until the underlying lines change
-- **Diagnostics-aware**: errors and warnings near the cursor go into the
-  prompt; a diagnostic where you just edited is the strongest next-edit
-  signal there is
-- **Six provider configurations** — hosted or fully local:
-  Anthropic (default), GitHub Copilot, OpenAI, Mercury, Ollama, and Zed's
-  Zeta models; chat providers get the exact cursor position, few-shot
-  examples and a schema-validated reply
-- **Diff overlay rendering**: small changes render as word-level inline
-  diffs, larger ones as highlighted lines with the proposed text below;
-  `<Tab>` accepts — or jumps to the edit first when it is far from the
-  cursor — and `<C-]>` dismisses
-- **Fast and non-blocking**: a Rust sidecar keeps HTTP and JSON off the
-  editor loop; requests are debounced, and predictions that finish after
-  you kept typing are shifted to their new position — they are only
-  dropped when your edits touched the predicted lines themselves
-- **Validated output**: model replies are schema-checked, clamped to the
-  excerpt, and no-op edits are discarded before they reach the editor
+- Sends your recent edits as diffs, coalesced into meaningful units (one
+  entry per rename or change, not one per keystroke) and collected across
+  all open buffers.
+- Sends the exact cursor position, the diagnostics around it, and a
+  treesitter outline of the file, so the model has real context to work
+  with.
+- Finds the places your last edit points at (an old name that still occurs
+  somewhere, a diagnostic mentioning it) and lets the prediction target
+  them, even in another file. A `»` sign marks the spot; the first `<Tab>`
+  jumps there, the second applies.
+- Renders small changes as word-level inline diffs and larger ones as
+  highlighted lines with the new text below. While a completion menu is
+  open, the preview moves above the change instead of hiding under the
+  menu.
+- Remembers what you decline. A dismissed suggestion is not proposed again
+  until the lines it touched change. Undoing an accepted prediction counts
+  as declining it.
+- Works with eleven provider setups, hosted or fully local, including
+  GitHub's purpose-trained next-edit model via the Copilot LSP.
+- Keeps the editor responsive: a small Rust sidecar owns all network
+  traffic, requests are debounced and superseded requests are cancelled.
+  Late predictions are shifted to their new position instead of thrown
+  away. Model replies are schema-checked and clamped to the code the model
+  was actually shown.
+
+Also documented as vim help: `:h nextedit`.
 
 ## Requirements
 
 - Neovim 0.10+
-- Rust toolchain (to build the server; not needed for `copilot-nes`)
-- Credentials for your chosen provider (see below), or a local model server
-- For `copilot-nes`: `copilot-language-server` is **required** — the easiest
-  way to get it is adding `zbirenbaum/copilot.lua` as a plugin dependency
-  (its bundled server is used automatically; needs Node 22+). Alternatives:
-  `npm install -g @github/copilot-language-server` or
+- A Rust toolchain to build the sidecar (not needed for `copilot-nes`)
+- Credentials for your provider, or a local model server
+- For `copilot-nes`: the `copilot-language-server` binary. The easiest way
+  to get it is adding `zbirenbaum/copilot.lua` as a plugin dependency; its
+  bundled server is found and started automatically (needs Node 22+).
+  Alternatives: `npm install -g @github/copilot-language-server` or
   `:MasonInstall copilot-language-server`.
 
 ## Install
@@ -71,113 +65,88 @@ With lazy.nvim:
 }
 ```
 
-Or from a local clone: build with `cd server && cargo build --release`, add
-the repo to your runtimepath, and call `require("nextedit").setup()`.
+Or with Copilot's native next-edit model, no Rust build required:
+
+```lua
+{
+  "zenodea/nextedit.nvim",
+  dependencies = { "zbirenbaum/copilot.lua" },
+  config = function()
+    require("nextedit").setup({ provider = "copilot-nes" })
+  end,
+}
+```
 
 ## Usage
 
-Just edit. At a trigger point — leaving insert mode or a normal-mode change,
-plus every typing pause with a `"typing"`-triggered provider — a prediction
-may appear after a short debounce (150 ms default): the lines it would
-replace are highlighted (`NextEditOld`), the proposed lines show underneath
-(`NextEditNew`).
+Just edit. Predictions are requested when you leave insert mode or make a
+normal-mode change. With fast providers (mercury, ollama, zeta) they are
+also requested as you type; see the `trigger` option. After a short debounce
+the overlay appears: replaced lines are highlighted, proposed text shows
+inline or below.
 
-| Key / command      | Action                                   |
-| ------------------ | ---------------------------------------- |
-| `<Tab>` (normal mode) | Accept the prediction; when it is more than a few lines away, the first press jumps to it (a `»` sign marks it) and the second applies. Falls through to normal `<Tab>` when none is shown |
-| `<C-]>` / `<Esc>`  | Dismiss the prediction                   |
-| `:NextEdit`        | Request a prediction now                 |
-| `:NextEditRestart` | Restart the server process               |
-| `:NextEditSignIn`  | GitHub device-code sign-in (`copilot-nes` only) |
-| `:checkhealth nextedit` | Diagnose binary, server and credential problems |
+| Key / command | Action |
+| ------------- | ------ |
+| `<Tab>` | Accept the prediction. If it is far from the cursor or in another buffer, the first press jumps to it and the second applies it. Falls through to the normal `<Tab>` when nothing is shown. |
+| `<C-]>` | Dismiss, and do not suggest this again until the lines change. |
+| `<Esc>` | Dismiss (normal mode). |
+| `:NextEdit` | Request a prediction now. |
+| `:NextEditRestart` | Restart the sidecar. |
+| `:NextEditSignIn` | GitHub device-code sign-in (`copilot-nes` only). |
+| `:checkhealth nextedit` | Diagnose binary, server and credential problems. |
 
 ## Providers
 
-| provider    | endpoint (default)      | default model      | credentials                      |
-| ----------- | ----------------------- | ------------------ | -------------------------------- |
-| `anthropic` | api.anthropic.com       | `claude-haiku-4-5` | `ANTHROPIC_API_KEY`              |
-| `copilot`   | api.githubcopilot.com   | `gpt-4.1`          | Copilot sign-in (see below)      |
-| `copilot-nes` | local Copilot LSP     | Copilot's NES model | Copilot sign-in + copilot-language-server (see Requirements) |
-| `openai`    | api.openai.com/v1       | `gpt-5-mini`       | `OPENAI_API_KEY`                 |
-| `mercury`   | api.inceptionlabs.ai/v1 | `mercury-2`        | `INCEPTION_API_KEY`              |
-| `gemini`    | generativelanguage.googleapis.com | `gemini-2.5-flash` | `GEMINI_API_KEY`         |
-| `xai`       | api.x.ai/v1             | `grok-code-fast-1` | `XAI_API_KEY`                    |
-| `mistral`   | api.mistral.ai/v1       | `codestral-latest` | `MISTRAL_API_KEY`                |
-| `openrouter`| openrouter.ai/api/v1    | `google/gemini-2.5-flash-lite` | `OPENROUTER_API_KEY` |
-| `ollama`    | localhost:11434/v1      | `qwen2.5-coder:7b` | none                             |
-| `zeta`      | localhost:11434/v1      | `zeta`             | none                             |
-| `zeta2`     | localhost:11434/v1      | `zeta2`            | none                             |
+| provider | endpoint (default) | default model | credentials |
+| -------- | ------------------ | ------------- | ----------- |
+| `anthropic` | api.anthropic.com | `claude-haiku-4-5` | `ANTHROPIC_API_KEY` |
+| `copilot` | api.githubcopilot.com | `gpt-4.1` | Copilot sign-in |
+| `copilot-nes` | local Copilot LSP | Copilot's NES model | Copilot sign-in (see Requirements) |
+| `openai` | api.openai.com/v1 | `gpt-5-mini` | `OPENAI_API_KEY` |
+| `mercury` | api.inceptionlabs.ai/v1 | `mercury-2` | `INCEPTION_API_KEY` |
+| `gemini` | generativelanguage.googleapis.com | `gemini-2.5-flash` | `GEMINI_API_KEY` |
+| `xai` | api.x.ai/v1 | `grok-code-fast-1` | `XAI_API_KEY` |
+| `mistral` | api.mistral.ai/v1 | `codestral-latest` | `MISTRAL_API_KEY` |
+| `openrouter` | openrouter.ai/api/v1 | `google/gemini-2.5-flash-lite` | `OPENROUTER_API_KEY` |
+| `ollama` | localhost:11434/v1 | `qwen2.5-coder:7b` | none |
+| `zeta`, `zeta2` | localhost:11434/v1 | `zeta`, `zeta2` | none |
 
 Notes:
 
-- **anthropic** uses structured outputs, so the reply is schema-validated
-  JSON, never free text to parse.
-- **copilot** reuses the GitHub OAuth token stored by
-  [copilot.lua](https://github.com/zbirenbaum/copilot.lua) or copilot.vim —
-  sign in once with `:Copilot auth` and it works with your existing Copilot
-  subscription. Any model available to Copilot chat can be set via `model`.
-- **copilot-nes** uses GitHub's purpose-trained Next Edit Suggestions model
-  by talking LSP to `copilot-language-server` — the same backend
-  sidekick.nvim and VS Code use, and the only provider here running a model
-  actually trained for next-edit prediction. The easiest setup is listing
-  copilot.lua as a plugin dependency — its bundled language server is found
-  and started automatically, no copilot.lua `setup()` needed (node 22+):
-
-  ```lua
-  {
-    "zenodea/nextedit.nvim",
-    dependencies = { "zbirenbaum/copilot.lua" },
-    config = function()
-      require("nextedit").setup({ provider = "copilot-nes" })
-    end,
-  }
-  ```
-
-  Alternatively `npm install -g @github/copilot-language-server` or
-  `:MasonInstall copilot-language-server` — and if a Copilot LSP client is
-  already running (a configured copilot.lua), it is simply reused. Sign in
-  once with `:NextEditSignIn` (any existing Copilot sign-in also counts).
-  The Rust sidecar, prompt pipeline and edit history are all bypassed —
-  Copilot tracks your edits server-side.
-- **mercury** is Inception Labs' diffusion coder; at ~1000 tok/s it is a
-  particularly good latency fit for edit prediction. `mercury-2` is a reasoning
-  model, so requests ask for `reasoning_effort: instant` — left at the default
-  it spends several hundred tokens thinking before emitting the edit, which
-  dominates the round trip (~2.9s median vs ~0.4s measured). Override with
-  `NEXTEDIT_REASONING_EFFORT` (`instant`, `low`, `medium`, `high`) if you want
-  to trade latency back for prediction quality.
-- **gemini**, **xai**, **mistral** and **openrouter** speak the same
-  OpenAI-compatible dialect with their own endpoints and key variables.
-  `grok-code-fast-1` and Gemini Flash are fast enough that
-  `trigger = "typing"` is worth trying with them.
-- **openai** works with any OpenAI-compatible chat completions server —
-  point `api_url` at llama.cpp, vLLM, OpenRouter, Groq, LM Studio, etc.
-  Requests include [predicted outputs](https://platform.openai.com/docs/guides/predicted-outputs)
-  seeded with the code around the cursor, which speeds up decoding on models
-  that support them; servers that reject the field are retried without it.
-- **zeta** speaks the native editable-region rewrite format of
-  [Zed's Zeta models](https://huggingface.co/zed-industries) over a raw
-  completions endpoint — serve one locally with Ollama, llama.cpp or vLLM.
-- **zeta2** speaks the newer [Zeta 2](https://huggingface.co/zed-industries/zeta-2)
-  dialect (Seed-Coder-8B): fill-in-the-middle in SPM order with the editable
-  region delimited by git merge markers, matching Zed's `V0211SeedCoder` format.
-
-  Both zeta providers build the prompt themselves and need it passed through
-  **verbatim**, so use a server that does not apply a chat template on top —
-  llama.cpp is the safe choice:
+- **anthropic** uses structured outputs, so replies are schema-validated
+  JSON rather than free text.
+- **copilot** reuses the GitHub OAuth token stored by copilot.lua,
+  copilot.vim or VS Code. Sign in once anywhere and it works.
+- **copilot-nes** talks LSP to `copilot-language-server`, the same backend
+  VS Code and sidekick.nvim use, and the only option here running a model
+  actually trained for next-edit prediction. A running Copilot client is
+  reused; otherwise the server is started directly. Sign in with
+  `:NextEditSignIn` if you have never signed in to Copilot before. The
+  sidecar and the plugin's own context pipeline are bypassed; Copilot
+  tracks your edits server-side.
+- **mercury** is Inception Labs' diffusion coder. At roughly 1000 tokens/s
+  it is a very good latency fit. Requests ask for
+  `reasoning_effort: instant`; override with `NEXTEDIT_REASONING_EFFORT`
+  if you want to trade latency for quality.
+- **gemini**, **xai**, **mistral**, **openrouter** speak the OpenAI dialect
+  with their own endpoints and key variables. `grok-code-fast-1` and Gemini
+  Flash are quick enough that `trigger = "typing"` is worth trying.
+- **openai** works with any OpenAI-compatible chat completions server:
+  point `api_url` at llama.cpp, vLLM, OpenRouter, Groq, LM Studio and so
+  on. Requests include predicted outputs where supported.
+- **zeta** and **zeta2** speak the native editable-region formats of
+  [Zed's Zeta models](https://huggingface.co/zed-industries), served
+  locally. They build their own prompts and need them passed through
+  verbatim, so use a server that does not apply a chat template
+  (llama.cpp is the safe choice):
 
   ```bash
   llama-server -hf bartowski/zed-industries_zeta-GGUF:Q4_K_M --port 8080 -c 8192
   ```
 
   ```lua
-  require("nextedit").setup({ provider = "zeta2", api_url = "http://localhost:8080/v1" })
+  require("nextedit").setup({ provider = "zeta", api_url = "http://localhost:8080/v1" })
   ```
-
-  Both rewrite the whole editable region rather than emitting a minimal edit, so
-  output length — and so latency — is set by `EDITABLE_RADIUS` in
-  `server/src/provider/zeta.rs` (17 lines by default). Lower it if local
-  inference feels slow.
 
 ## Configuration
 
@@ -185,108 +154,85 @@ Defaults shown:
 
 ```lua
 require("nextedit").setup({
-  trigger = nil,         -- "boundary" (predict when you leave insert mode or change text in
-                         -- normal mode) or "typing" (also predict as you type in insert mode);
-                         -- defaults to "typing" for mercury/ollama/zeta, "boundary" otherwise
-  debounce_ms = 150,     -- pause after typing before requesting a prediction
+  trigger = nil,         -- "boundary" (predict at edit boundaries) or "typing"
+                         -- (also predict as you type); defaults to "typing" for
+                         -- mercury/ollama/zeta and "boundary" for the rest
+  debounce_ms = 150,     -- pause before a request is sent
   context_lines = 40,    -- buffer lines sent above and below the cursor
   accept_key = "<Tab>",
   dismiss_key = "<C-]>",
-  server_cmd = nil,      -- override the server binary, e.g. { "/path/to/nextedit-server" }
-  provider = nil,        -- "anthropic" (default), "copilot", "openai", "mercury", "ollama" or "zeta"
+  server_cmd = nil,      -- override the sidecar binary
+  provider = nil,        -- see the table above; default "anthropic"
   model = nil,           -- provider-specific model name
-  api_url = nil,         -- override the provider's endpoint
-  api_key = nil,         -- prefer the provider's env var; for keyless local setups
+  api_url = nil,         -- override the provider endpoint
+  api_key = nil,         -- prefer the provider's env var
   filetypes = { gitcommit = false, gitrebase = false, help = false },
                          -- per-filetype toggle; unlisted filetypes are enabled
   deny_paths = { "%.env", "%.pem$", "secret", "credential" },
-                         -- never predict in files matching these Lua patterns
-                         -- (secrets should not reach an API); overrides replace the list
+                         -- never predict in files matching these Lua patterns,
+                         -- so secrets stay out of API requests; setting this
+                         -- replaces the default list
   max_lines = 10000,     -- skip buffers larger than this
 })
 ```
 
+The same settings are read from the environment (Lua options win per key):
+`NEXTEDIT_PROVIDER`, `NEXTEDIT_MODEL`, `NEXTEDIT_API_URL`,
+`NEXTEDIT_API_KEY`, with provider key fallbacks such as `ANTHROPIC_API_KEY`.
+
 For statuslines, `require("nextedit").status()` returns
 `{ provider, inflight, last_error }`. Request errors are notified once per
-failure streak, not per request.
-
-Examples:
-
-```lua
--- GitHub Copilot, using your existing sign-in
-require("nextedit").setup({ provider = "copilot" })
-
--- Copilot's native NES model (needs the Copilot LSP attached in Neovim)
-require("nextedit").setup({ provider = "copilot-nes" })
-
--- Mercury
-require("nextedit").setup({ provider = "mercury" })
-
--- Local model via Ollama
-require("nextedit").setup({ provider = "ollama", model = "qwen2.5-coder:7b" })
-
--- Zeta served by llama.cpp
-require("nextedit").setup({ provider = "zeta", api_url = "http://localhost:8080/v1" })
-```
-
-The same settings are also read from the environment (the Lua options
-override per key): `NEXTEDIT_PROVIDER`, `NEXTEDIT_MODEL`, `NEXTEDIT_API_URL`,
-`NEXTEDIT_API_KEY`, with provider key fallbacks `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `INCEPTION_API_KEY`.
+failure streak, then muted until a request succeeds.
 
 Highlights: `NextEditOld` links to `DiffDelete`, `NextEditNew` to `DiffAdd`,
-`NextEditSign` (the `»` gutter mark) to `DiagnosticSignInfo`. Override any of
-them with `:hi` or `nvim_set_hl`.
+`NextEditSign` (the `»` mark) to `DiagnosticSignInfo`.
 
 ## How it works
 
-The plugin is split in two. On the Lua side, `init.lua` handles autocmds,
-debouncing and keymaps; `diff.lua` keeps a short history of your recent edits
-as `vim.diff` snapshots committed at edit boundaries, merging consecutive
-changes to the same region into one semantic edit; `render.lua` turns a
-prediction into extmarks (word-level inline diffs for small changes, a block
-overlay otherwise) and `ui.lua` shows, applies and jumps to them. It talks
-over stdio — one JSON object per line — to a Rust sidecar (`server/`) that
-owns all network traffic, so the editor loop never blocks on HTTP; tokio also
-makes cancelling superseded requests trivial.
+Two halves. The Lua side handles triggering, context gathering and
+rendering: `diff.lua` keeps the edit history (buffer snapshots committed at
+edit boundaries, nearby commits merged into one entry), `outline.lua` builds
+the treesitter outline, `regions.lua` finds related sites through
+diagnostics and a token scan, `render.lua` turns a prediction into extmarks
+and `ui.lua` shows, applies, jumps and remembers rejections. It talks over
+stdio, one JSON object per line, to a Rust sidecar (`server/`) that owns the
+HTTP traffic, so the editor loop never blocks; a new request aborts the
+in-flight one.
 
-A prediction cycle:
+A cycle: a trigger fires, the debounce timer runs out, and the excerpt
+around the cursor plus cursor position, edit history, diagnostics, outline
+and related regions go to the server. The server prompts the configured
+provider (structured JSON with few-shot examples for chat backends, an
+editable-region rewrite for Zeta), validates the reply against the code the
+model was shown, and drops no-ops. The Lua side shifts the prediction across
+any edits made while the request was in flight, drops it if those edits
+touched the predicted lines, and renders it. Accepting fires `TextChanged`,
+which requests the next prediction.
 
-1. At a trigger point (leaving insert mode, a normal-mode change, and — with
-   `trigger = "typing"` — every insert-mode change) the current overlay is
-   dismissed and a debounce timer restarts.
-2. When the timer fires, the excerpt around the cursor, the exact cursor
-   position (line and column), the coalesced recent-edit history, and any
-   diagnostics in the excerpt go to the server. A new request aborts any
-   in-flight one; the Lua side also drops responses whose id or changedtick
-   is stale.
-3. The server prompts the configured provider — structured JSON with
-   few-shot examples for Anthropic/OpenAI-style backends, an editable-region
-   rewrite for Zeta — validates the edit against the excerpt, and discards
-   no-ops.
-4. `ui.lua` renders the edit as extmarks. `<Tab>` jumps to it if it is far
-   away, then applies it with `nvim_buf_set_lines`, which fires
-   `TextChanged`, so a follow-up prediction is requested automatically. That
-   is what gives the Tab-Tab-Tab chaining feel.
+The `copilot-nes` provider replaces all of this with LSP requests to
+`copilot-language-server` (`lua/nextedit/nes.lua`).
 
-## Roadmap
+## Development
 
-- Cross-file excerpts: related regions from *other* buffers, not just edit
-  history
-- Treesitter syntax highlighting inside the diff overlay
-- Multiple edits per prediction (a chain of locations from one request)
-- Prompt caching and streaming for lower latency
-- Partial accept (word or line at a time)
-- Incremental edit tracking instead of whole-buffer snapshots
-- Local accept/dismiss stats to measure prediction quality per provider
+Run the tests:
 
-## Limitations (deliberate, for now)
+```bash
+nvim --headless -l tests/run.lua   # Lua: history, regions, rendering, UI flows
+cargo test --manifest-path server/Cargo.toml
+```
 
-- One prediction at a time; editable regions are the cursor excerpt plus the
-  detected related sites, all within the current file
-- Whole-buffer snapshot per commit; buffers beyond `max_lines` are skipped
-- No streaming, no caching
+CI runs both suites on every push. `tests/fake-server.py` stands in for the
+sidecar so the Lua suite needs no credentials.
+
+## Not there yet
+
+- One prediction at a time. Editable regions cover the cursor excerpt plus
+  detected related sites in open buffers, not whole unopened files.
+- Whole-buffer snapshots per edit commit; buffers over `max_lines` are
+  skipped instead.
+- No streaming, no prompt caching, no partial accept.
+- No local accept-rate stats yet, so provider comparisons are still vibes.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
