@@ -76,9 +76,9 @@ local function default_server_cmd()
   return { target .. "release/nextedit-server" } -- let server.start report the error
 end
 
---- The lines [s, e] as they were sent to the model, from whichever region
---- (excerpt or extra) contains the whole range.
-local function sent_lines(params, s, e)
+--- The lines [s, e] as they were sent to the model, from whichever region of
+--- the file `path` contains the whole range.
+local function sent_lines(params, path, s, e)
   local function slice(start, lines)
     if s >= start and e <= start + #lines - 1 then
       local out = {}
@@ -88,26 +88,49 @@ local function sent_lines(params, s, e)
       return out
     end
   end
-  local got = slice(params.excerpt_start, params.excerpt_lines)
+  local got = path == params.path and slice(params.excerpt_start, params.excerpt_lines) or nil
   for _, r in ipairs(params.extra_regions or {}) do
-    got = got or slice(r.start, r.lines)
+    if r.path == path then
+      got = got or slice(r.start, r.lines)
+    end
   end
   return got
 end
 
---- The prediction targeted the buffer as it was when the request was sent;
---- shift it across the edits made since, and show it only if the lines it
---- replaces are still exactly what the model saw.
-local function remap_and_show(buf, params, result)
+--- The prediction targeted the buffers as they were when the request was
+--- sent; shift it across the edits made since, and show it only if the lines
+--- it replaces are still exactly what the model saw.
+local function remap_and_show(buf, params, targets, result)
   local events = track.finish(buf)
   if not vim.api.nvim_buf_is_valid(buf) or vim.api.nvim_get_current_buf() ~= buf then
+    return
+  end
+  local path = result.path or params.path
+  if path ~= params.path then
+    -- Cross-file edit. Only the origin buffer's changes are tracked, so no
+    -- remapping: the target lines must be exactly what the model saw.
+    local target = targets[path]
+    if not target or not vim.api.nvim_buf_is_valid(target) or not vim.api.nvim_buf_is_loaded(target) then
+      return
+    end
+    local original = sent_lines(params, path, result.start_line, result.end_line)
+    local lines = vim.api.nvim_buf_get_lines(target, result.start_line - 1, result.end_line, false)
+    if not original or not vim.deep_equal(lines, original) then
+      return
+    end
+    ui.show(target, {
+      start_line = result.start_line,
+      end_line = result.end_line,
+      replacement = result.replacement,
+      hint_buf = buf, -- show "edit elsewhere" at the cursor
+    }, vim.b[target].changedtick)
     return
   end
   local start_line, end_line = track.remap(result.start_line, result.end_line, events)
   if not start_line then
     return
   end
-  local original = sent_lines(params, result.start_line, result.end_line)
+  local original = sent_lines(params, path, result.start_line, result.end_line)
   if not original then
     return
   end
@@ -205,7 +228,7 @@ local function request_prediction()
   local first = math.max(1, cursor_line - opts.context_lines)
   local last = math.min(vim.api.nvim_buf_line_count(buf), cursor_line + opts.context_lines)
   local params = {
-    path = vim.api.nvim_buf_get_name(buf),
+    path = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ":."),
     filetype = vim.bo[buf].filetype,
     cursor_line = cursor_line,
     cursor_col = cursor[2],
@@ -215,9 +238,15 @@ local function request_prediction()
     diagnostics = excerpt_diagnostics(buf, first, last),
     outline = outline.get(buf),
   }
-  -- Candidate sites elsewhere in the file that the recent edits point at;
-  -- lets the prediction land far from the cursor, with tab-to-jump.
-  params.extra_regions = regions.find(buf, params.recent_edits, first, last)
+  -- Candidate sites the recent edits point at, in this file or another open
+  -- buffer; lets the prediction land far from the cursor, with tab-to-jump.
+  local found = regions.find(buf, params.recent_edits, first, last, enabled)
+  local targets = {} -- path -> bufnr, for routing a cross-file prediction
+  params.extra_regions = {}
+  for _, r in ipairs(found) do
+    targets[r.path] = r.bufnr
+    params.extra_regions[#params.extra_regions + 1] = { path = r.path, start = r.start, lines = r.lines }
+  end
   track.begin(buf)
   local id = server.predict(params, function(result, err)
     vim.schedule(function()
@@ -227,7 +256,7 @@ local function request_prediction()
         report_error(err)
       elseif result and result.has_edit then
         report_ok()
-        remap_and_show(buf, params, result)
+        remap_and_show(buf, params, targets, result)
       else
         track.finish(buf)
         report_ok()
@@ -360,8 +389,13 @@ function M.setup(user_opts)
   end, vim.api.nvim_create_namespace("nextedit.esc"))
   vim.api.nvim_create_autocmd("BufLeave", {
     group = group,
-    callback = function()
-      ui.dismiss()
+    callback = function(ev)
+      -- Dismiss only when leaving the buffer holding the prediction:
+      -- accepting a cross-buffer prediction jumps *into* that buffer, and
+      -- the overlay must survive the switch.
+      if ui.buffer() == ev.buf then
+        ui.dismiss()
+      end
     end,
   })
   vim.api.nvim_create_autocmd("BufDelete", {

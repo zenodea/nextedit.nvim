@@ -179,13 +179,20 @@ impl<'a> EditableRegion<'a> {
                 replacement.push(original[anchor].clone());
             }
             let line = self.abs_start + anchor;
-            return Prediction { has_edit: true, start_line: line, end_line: line, replacement };
+            return Prediction {
+                has_edit: true,
+                start_line: line,
+                end_line: line,
+                replacement,
+                path: None,
+            };
         }
         Prediction {
             has_edit: true,
             start_line: self.abs_start + pre,
             end_line: self.abs_start + pre + orig_mid.len() - 1,
             replacement: new_mid.to_vec(),
+            path: None,
         }
     }
 }

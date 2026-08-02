@@ -1,11 +1,20 @@
--- Finds lines elsewhere in the file that the user's recent edits probably
--- affect next: identifiers the edits removed or replaced (an old function
--- name, say) still occur there. Those lines are sent as extra regions the
--- model may target, which is what lets a prediction land far outside the
--- cursor excerpt — the UI then offers a tab-to-jump.
+-- Finds sites the user's recent edits probably affect next: places where
+-- identifiers the edits removed or replaced (an old function name, say)
+-- still occur. Candidates come from two sources, most precise first:
+--
+--   1. Diagnostics, in any loaded buffer, whose message or line mentions a
+--      removed identifier. A rename leaves "undefined name" errors at every
+--      stale call site, which is as exact as this signal gets. (LSP
+--      references cannot find these: stale sites are *broken* references.)
+--   2. A plain text scan for the removed identifiers, in the current buffer
+--      outside the excerpt and then in other loaded buffers.
+--
+-- The resulting regions are sent as extra editable context, so a prediction
+-- can land far from the cursor or in another file; the UI offers tab-to-jump.
 local M = {}
 
-local MAX_REGIONS = 3
+local MAX_REGIONS = 4
+local MAX_BUFFERS = 8
 local CONTEXT = 3
 local MAX_RECENT = 3 -- only mine the newest edits; old ones are stale signal
 
@@ -44,37 +53,96 @@ local function stale_tokens(edits)
   return out
 end
 
---- Up to MAX_REGIONS excerpts ({ start, lines }) of buffer lines outside
---- [first, last] that still contain an identifier the recent edits removed.
-function M.find(buf, edits, first, last)
+local function contains_any(text, tokens)
+  for _, token in ipairs(tokens) do
+    if text:find(token, 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+--- Up to MAX_REGIONS excerpts ({ bufnr, path, start, lines }) around lines
+--- that still contain an identifier the recent edits removed. Looks in the
+--- origin buffer outside [first, last] and in other loaded buffers that pass
+--- `allowed` (the caller's own enablement rules, so denied files stay out).
+function M.find(buf, edits, first, last, allowed)
   local tokens = stale_tokens(edits)
   if #tokens == 0 then
     return {}
   end
-  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-  local regions = {}
-  for lnum, line in ipairs(lines) do
-    if lnum < first or lnum > last then
-      local hit = false
-      for _, token in ipairs(tokens) do
-        if line:find(token, 1, true) then
-          hit = true
-          break
-        end
+
+  local order, hits = {}, {} -- bufnr -> { lnum, ... }, insertion-ordered
+  local function add(bufnr, lnum)
+    if not hits[bufnr] then
+      hits[bufnr] = {}
+      order[#order + 1] = bufnr
+    end
+    table.insert(hits[bufnr], lnum)
+  end
+
+  -- Diagnostics anywhere, most precise first.
+  for _, d in ipairs(vim.diagnostic.get(nil)) do
+    if
+      d.severity <= vim.diagnostic.severity.WARN
+      and vim.api.nvim_buf_is_loaded(d.bufnr)
+      and (d.bufnr == buf or (allowed == nil or allowed(d.bufnr)))
+      and not (d.bufnr == buf and d.lnum + 1 >= first and d.lnum + 1 <= last)
+    then
+      local line = vim.api.nvim_buf_get_lines(d.bufnr, d.lnum, d.lnum + 1, false)[1] or ""
+      if contains_any(d.message, tokens) or contains_any(line, tokens) then
+        add(d.bufnr, d.lnum + 1)
       end
-      if hit then
-        local s, e = math.max(1, lnum - CONTEXT), math.min(#lines, lnum + CONTEXT)
-        local prev = regions[#regions]
-        if prev and s <= prev.stop + 1 then
-          prev.stop = math.max(prev.stop, e)
-        elseif #regions < MAX_REGIONS then
-          regions[#regions + 1] = { start = s, stop = e }
-        end
+    end
+  end
+
+  -- Text scan: origin buffer, then other loaded buffers.
+  local scan = { buf }
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if #scan >= MAX_BUFFERS then
+      break
+    end
+    if
+      b ~= buf
+      and vim.api.nvim_buf_is_loaded(b)
+      and vim.bo[b].buflisted
+      and vim.api.nvim_buf_get_name(b) ~= "" -- an unnamed buffer has no path to send
+      and (allowed == nil or allowed(b))
+    then
+      scan[#scan + 1] = b
+    end
+  end
+  for _, b in ipairs(scan) do
+    for lnum, line in ipairs(vim.api.nvim_buf_get_lines(b, 0, -1, false)) do
+      if not (b == buf and lnum >= first and lnum <= last) and contains_any(line, tokens) then
+        add(b, lnum)
+      end
+    end
+  end
+
+  -- Merge each buffer's hits into context regions, capped overall.
+  local regions = {}
+  for _, bufnr in ipairs(order) do
+    if #regions >= MAX_REGIONS then
+      break
+    end
+    local lnums = hits[bufnr]
+    table.sort(lnums)
+    local line_count = vim.api.nvim_buf_line_count(bufnr)
+    local path = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":.")
+    local prev = nil
+    for _, lnum in ipairs(lnums) do
+      local s, e = math.max(1, lnum - CONTEXT), math.min(line_count, lnum + CONTEXT)
+      if prev and prev.bufnr == bufnr and s <= prev.stop + 1 then
+        prev.stop = math.max(prev.stop, e)
+      elseif #regions < MAX_REGIONS then
+        prev = { bufnr = bufnr, path = path, start = s, stop = e }
+        regions[#regions + 1] = prev
       end
     end
   end
   for _, r in ipairs(regions) do
-    r.lines = vim.list_slice(lines, r.start, r.stop)
+    r.lines = vim.api.nvim_buf_get_lines(r.bufnr, r.start - 1, r.stop, false)
     r.stop = nil
   end
   return regions

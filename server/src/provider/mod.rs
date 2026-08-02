@@ -69,7 +69,9 @@ current text in the replacement.
 code the user has not touched.
 - The edit may target the excerpt or any \"related region\" shown; use a \
 related region when the user's last edit clearly needs the same change there \
-(a renamed function's remaining call site, say).
+(a renamed function's remaining call site, say). When the region is in a \
+different file, set \"path\" to that file's path exactly as shown; otherwise \
+omit \"path\".
 - Match the file's existing style exactly (indentation, naming, quoting).
 - Diagnostics, when present, usually point at the fix the user is about to \
 make; an edit that resolves one near the cursor is a strong prediction.
@@ -82,7 +84,8 @@ is worse than none.";
 pub(crate) const FORMAT_INSTRUCTIONS: &str = "\n\nRespond with only a JSON object shaped as \
 {\"has_edit\": boolean, \"start_line\": integer, \"end_line\": integer, \"replacement\": string} \
 where replacement is the full new text for the replaced lines, newline-separated, \
-and an empty string deletes them. No prose, no code fences.";
+and an empty string deletes them. Add \"path\": string only when the edit is in a \
+related region from a different file. No prose, no code fences.";
 
 /// Two worked examples sent as prior conversation turns: a rename propagated
 /// to its call site (the canonical next edit) and a confident no-edit. They
@@ -188,6 +191,9 @@ pub(crate) struct ModelEdit {
     pub start_line: usize,
     pub end_line: usize,
     pub replacement: String,
+    /// Set when the edit targets a related region from a different file.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 pub(crate) fn http_client() -> reqwest::Client {
@@ -237,7 +243,11 @@ pub(crate) fn user_prompt(p: &PredictParams) -> String {
         }
     }
     for r in &p.extra_regions {
-        s.push_str("\nRelated region elsewhere in the file (also editable):\n");
+        if r.path == p.path {
+            s.push_str("\nRelated region elsewhere in this file (also editable):\n");
+        } else {
+            let _ = writeln!(s, "\nRelated region in {} (also editable):", r.path);
+        }
         for (i, line) in r.lines.iter().enumerate() {
             let _ = writeln!(s, "{:5}| {}", r.start + i, line);
         }
@@ -271,6 +281,10 @@ pub(crate) fn edit_schema() -> serde_json::Value {
             "replacement": {
                 "type": "string",
                 "description": "full new text for the replaced lines, newline-separated; empty string deletes the lines"
+            },
+            "path": {
+                "type": "string",
+                "description": "only when the edit is in a related region from a different file: that file's path exactly as shown"
             }
         },
         "required": ["has_edit", "start_line", "end_line", "replacement"],
@@ -318,6 +332,7 @@ mod tests {
             diagnostics: vec![],
             outline: vec![],
             extra_regions: vec![crate::protocol::Region {
+                path: "other.py".into(),
                 start: 200,
                 lines: vec!["x = get_user(1)".into()],
             }],
@@ -327,16 +342,19 @@ mod tests {
             start_line: 200,
             end_line: 200,
             replacement: "x = fetch_user(1)".into(),
+            path: Some("other.py".into()),
         };
         let pred = validate(edit, &p);
         assert!(pred.has_edit);
         assert_eq!((pred.start_line, pred.end_line), (200, 200));
-        // ...but an edit outside every region is rejected.
+        assert_eq!(pred.path.as_deref(), Some("other.py"));
+        // ...but an edit whose range and path do not match a region is rejected.
         let stray = ModelEdit {
             has_edit: true,
-            start_line: 150,
-            end_line: 150,
+            start_line: 200,
+            end_line: 200,
             replacement: "whatever".into(),
+            path: None, // claims the current file, but 200 is only in other.py
         };
         assert!(!validate(stray, &p).has_edit);
     }
@@ -357,12 +375,17 @@ pub(crate) fn validate(edit: ModelEdit, p: &PredictParams) -> Prediction {
     if !edit.has_edit || edit.start_line > edit.end_line {
         return Prediction::none();
     }
-    // The region (excerpt or extra) that fully contains the edit.
-    let regions = std::iter::once((p.excerpt_start, &p.excerpt_lines))
-        .chain(p.extra_regions.iter().map(|r| (r.start, &r.lines)));
-    let Some((start, lines)) = regions
-        .filter(|(start, lines)| {
-            edit.start_line >= *start && edit.end_line <= start + lines.len().saturating_sub(1)
+    // The region (excerpt or extra) that fully contains the edit, in the
+    // file the edit names (models sometimes echo the current path; treat
+    // that as "no path").
+    let edit_path = edit.path.as_deref().filter(|path| *path != p.path);
+    let regions = std::iter::once((p.path.as_str(), p.excerpt_start, &p.excerpt_lines))
+        .chain(p.extra_regions.iter().map(|r| (r.path.as_str(), r.start, &r.lines)));
+    let Some((path, start, lines)) = regions
+        .filter(|(path, start, lines)| {
+            *path == edit_path.unwrap_or(&p.path)
+                && edit.start_line >= *start
+                && edit.end_line <= start + lines.len().saturating_sub(1)
         })
         .next()
     else {
@@ -379,5 +402,11 @@ pub(crate) fn validate(edit: ModelEdit, p: &PredictParams) -> Prediction {
     if current == replacement.as_slice() {
         return Prediction::none();
     }
-    Prediction { has_edit: true, start_line: edit.start_line, end_line: edit.end_line, replacement }
+    Prediction {
+        has_edit: true,
+        start_line: edit.start_line,
+        end_line: edit.end_line,
+        replacement,
+        path: (path != p.path).then(|| path.to_string()),
+    }
 }
