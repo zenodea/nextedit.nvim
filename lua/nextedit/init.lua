@@ -28,6 +28,23 @@ local timer = vim.uv.new_timer()
 local inflight = nil -- { buf, sent_at }
 local rerequest = false -- a request came in while one was in flight
 local INFLIGHT_TIMEOUT_MS = 10000
+local last_error = nil
+local error_notified = false
+
+--- Warn once per failure streak: with typing-triggered providers an outage
+--- would otherwise notify on every pause.
+local function report_error(err)
+  last_error = err
+  if not error_notified then
+    error_notified = true
+    vim.notify("nextedit: " .. err .. " (muting further errors until a request succeeds)", vim.log.levels.WARN)
+  end
+end
+
+local function report_ok()
+  last_error = nil
+  error_notified = false
+end
 
 local function plugin_root()
   local source = debug.getinfo(1, "S").source:sub(2)
@@ -120,9 +137,12 @@ local function request_prediction()
     local sent = nes.request(buf, function(result, err)
       inflight = nil
       if err then
-        vim.notify("nextedit: " .. err, vim.log.levels.WARN)
+        report_error(err)
       elseif result and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_current_buf() == buf then
+        report_ok()
         ui.show(buf, result, vim.b[buf].changedtick)
+      else
+        report_ok()
       end
       if rerequest then
         rerequest = false
@@ -154,11 +174,13 @@ local function request_prediction()
       inflight = nil
       if err then
         track.finish(buf)
-        vim.notify("nextedit: " .. err, vim.log.levels.WARN)
+        report_error(err)
       elseif result and result.has_edit then
+        report_ok()
         remap_and_show(buf, params, result)
       else
         track.finish(buf)
+        report_ok()
       end
       if rerequest then
         rerequest = false
@@ -181,6 +203,16 @@ end
 --- Introspection for :checkhealth; nil until setup() has run.
 function M.current_opts()
   return opts
+end
+
+--- For statuslines: provider name, whether a request is in flight, and the
+--- last error (nil when healthy).
+function M.status()
+  return {
+    provider = (opts and opts.provider) or vim.env.NEXTEDIT_PROVIDER or "anthropic",
+    inflight = inflight ~= nil,
+    last_error = last_error,
+  }
 end
 
 function M.server_command()
