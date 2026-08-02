@@ -198,7 +198,7 @@ fn build_prompt(p: &PredictParams, region: &EditableRegion) -> String {
         s.push_str("(none)\n");
     }
     for d in &p.recent_edits {
-        let _ = writeln!(s, "User edited {:?}:\n```diff\n{}\n```\n", p.path, d.trim_end());
+        let _ = writeln!(s, "User edited {:?}:\n```diff\n{}\n```\n", d.path, d.diff.trim_end());
     }
     let _ = writeln!(s, "\n### User Excerpt:\n\n```{}", p.path);
     let region_first = region.abs_start - p.excerpt_start;
@@ -249,7 +249,7 @@ fn build_prompt_v2(p: &PredictParams, region: &EditableRegion) -> String {
     if !p.recent_edits.is_empty() {
         let _ = writeln!(s, "{FILE_MARKER}edit_history");
         for d in &p.recent_edits {
-            let _ = writeln!(s, "--- a/{}\n+++ b/{}\n{}", p.path, p.path, d.trim_end());
+            let _ = writeln!(s, "--- a/{}\n+++ b/{}\n{}", d.path, d.path, d.diff.trim_end());
         }
         s.push('\n');
     }
@@ -377,7 +377,10 @@ mod tests {
             diagnostics: vec![],
             excerpt_start: 1,
             excerpt_lines: lines(&["prefix", "editable", "suffix"]),
-            recent_edits: vec!["-old\n+new".into()],
+            recent_edits: vec![crate::protocol::RecentEdit {
+                path: "test.rs".into(),
+                diff: "-old\n+new".into(),
+            }],
         };
         let region = EditableRegion { lines: &p.excerpt_lines[1..=1], abs_start: 2 };
         assert_eq!(

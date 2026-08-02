@@ -40,8 +40,8 @@ diffmod.commit(dbuf)
 vim.api.nvim_buf_set_lines(dbuf, 1, 2, false, { "TWO" })
 diffmod.commit(dbuf)
 check("history: nearby commits merge into one entry", #diffmod.take(dbuf), 1)
-check("history: merged entry spans both changes", diffmod.take(dbuf)[1]:match("ONE") ~= nil
-  and diffmod.take(dbuf)[1]:match("TWO") ~= nil, true)
+check("history: merged entry spans both changes", diffmod.take(dbuf)[1].diff:match("ONE") ~= nil
+  and diffmod.take(dbuf)[1].diff:match("TWO") ~= nil, true)
 vim.api.nvim_buf_set_lines(dbuf, 11, 12, false, { "TWELVE" })
 diffmod.commit(dbuf)
 check("history: distant commit starts a new entry", #diffmod.take(dbuf), 2)
