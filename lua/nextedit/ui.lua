@@ -42,8 +42,21 @@ end
 local rejected = {} -- { { buf, original, replacement }, ... } most recent last
 local REJECTED_MAX = 5
 
+-- The most recently applied prediction, kept briefly so an undo of it can be
+-- recognized and treated as a rejection.
+local last_accepted = nil -- { buf, start_line, orig_count, original, replacement, at }
+local UNDO_WINDOW_MS = 15000
+
+local function remember_rejection(buf, original, replacement)
+  rejected[#rejected + 1] = { buf = buf, original = original, replacement = replacement }
+  if #rejected > REJECTED_MAX then
+    table.remove(rejected, 1)
+  end
+end
+
 --- pred = { start_line, end_line, replacement } (absolute 1-indexed, inclusive)
 function M.show(buf, pred, tick)
+  buf = buf == 0 and vim.api.nvim_get_current_buf() or buf -- accept() compares real bufnrs
   M.dismiss()
   if pred.end_line > vim.api.nvim_buf_line_count(buf) then
     return
@@ -135,16 +148,29 @@ function M.reject()
   if current and vim.api.nvim_buf_is_valid(current.buf) then
     local c = current
     local lines = vim.api.nvim_buf_get_lines(c.buf, c.start_line - 1, c.end_line, false)
-    rejected[#rejected + 1] = {
-      buf = c.buf,
-      original = table.concat(lines, "\n"),
-      replacement = table.concat(c.replacement, "\n"),
-    }
-    if #rejected > REJECTED_MAX then
-      table.remove(rejected, 1)
-    end
+    remember_rejection(c.buf, table.concat(lines, "\n"), table.concat(c.replacement, "\n"))
   end
   M.dismiss()
+end
+
+--- Called on every TextChanged: if the change put the recently accepted
+--- range back to exactly its pre-accept text, the user undid the prediction,
+--- which is as clear a rejection as pressing dismiss.
+function M.check_undo(buf)
+  buf = buf == 0 and vim.api.nvim_get_current_buf() or buf
+  local a = last_accepted
+  if not a or a.buf ~= buf then
+    return
+  end
+  if vim.uv.now() - a.at > UNDO_WINDOW_MS or not vim.api.nvim_buf_is_valid(buf) then
+    last_accepted = nil
+    return
+  end
+  local lines = vim.api.nvim_buf_get_lines(buf, a.start_line - 1, a.start_line - 1 + a.orig_count, false)
+  if table.concat(lines, "\n") == a.original then
+    remember_rejection(buf, a.original, a.replacement)
+    last_accepted = nil
+  end
 end
 
 --- Accept the pending prediction: jump to it when it is far from the cursor,
@@ -175,6 +201,15 @@ function M.accept()
     return true
   end
   M.dismiss()
+  local before = vim.api.nvim_buf_get_lines(c.buf, c.start_line - 1, c.end_line, false)
+  last_accepted = {
+    buf = c.buf,
+    start_line = c.start_line,
+    orig_count = c.end_line - c.start_line + 1,
+    original = table.concat(before, "\n"),
+    replacement = table.concat(c.replacement, "\n"),
+    at = vim.uv.now(),
+  }
   vim.api.nvim_buf_set_lines(c.buf, c.start_line - 1, c.end_line, false, c.replacement)
   -- Land the cursor at the end of the new text.
   if vim.api.nvim_win_get_buf(win) == c.buf then
