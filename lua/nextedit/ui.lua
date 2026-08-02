@@ -37,6 +37,11 @@ local function completion_visible()
   return false
 end
 
+-- Explicitly dismissed predictions, matched on content rather than position
+-- so a suggestion stays rejected even when the lines shift.
+local rejected = {} -- { { buf, original, replacement }, ... } most recent last
+local REJECTED_MAX = 5
+
 --- pred = { start_line, end_line, replacement } (absolute 1-indexed, inclusive)
 function M.show(buf, pred, tick)
   M.dismiss()
@@ -44,6 +49,15 @@ function M.show(buf, pred, tick)
     return
   end
   local original = vim.api.nvim_buf_get_lines(buf, pred.start_line - 1, pred.end_line, false)
+  -- The user already said no to exactly this suggestion; stay quiet until
+  -- the underlying lines change.
+  local original_text = table.concat(original, "\n")
+  local replacement_text = table.concat(pred.replacement, "\n")
+  for _, r in ipairs(rejected) do
+    if r.buf == buf and r.original == original_text and r.replacement == replacement_text then
+      return
+    end
+  end
   local marks = render.extmarks(original, pred.replacement, pred.start_line - 1, completion_visible())
   if #marks == 0 then
     return
@@ -92,6 +106,26 @@ function M.dismiss()
   end
   vim.api.nvim_buf_clear_namespace(current.buf, ns, 0, -1)
   current = nil
+end
+
+--- Explicit user dismissal: like dismiss(), but remember the suggestion so
+--- an identical one is not shown again. (Plain dismiss() is also called for
+--- routine clearing — buffer changes, mode switches — where remembering
+--- would wrongly blacklist suggestions the user never declined.)
+function M.reject()
+  if current and vim.api.nvim_buf_is_valid(current.buf) then
+    local c = current
+    local lines = vim.api.nvim_buf_get_lines(c.buf, c.start_line - 1, c.end_line, false)
+    rejected[#rejected + 1] = {
+      buf = c.buf,
+      original = table.concat(lines, "\n"),
+      replacement = table.concat(c.replacement, "\n"),
+    }
+    if #rejected > REJECTED_MAX then
+      table.remove(rejected, 1)
+    end
+  end
+  M.dismiss()
 end
 
 --- Accept the pending prediction: jump to it when it is far from the cursor,

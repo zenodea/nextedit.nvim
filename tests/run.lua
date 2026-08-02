@@ -109,7 +109,20 @@ vim.wait(100)
 vim.api.nvim_buf_set_lines(0, 3, 4, false, { "def sub(x, y):" })
 check("overlap live: prediction is dropped", vim.wait(1500, ui.visible, 10), false)
 
--- 4. Cursor far from the prediction: first accept jumps, second applies.
+-- 4. Rejected suggestions stay rejected until the underlying lines change.
+reset_buffer()
+local pred = { start_line = 4, end_line = 4, replacement = { "def sub(x):" } }
+ui.show(0, pred, vim.b[0].changedtick)
+check("reject: suggestion shows", ui.visible(), true)
+ui.reject()
+ui.show(0, pred, vim.b[0].changedtick)
+check("reject: identical suggestion is suppressed", ui.visible(), false)
+vim.api.nvim_buf_set_lines(0, 3, 4, false, { "def sub(a, b, c):" })
+ui.show(0, pred, vim.b[0].changedtick)
+check("reject: shows again once the line changed", ui.visible(), true)
+ui.dismiss()
+
+-- 5. Cursor far from the prediction: first accept jumps, second applies.
 reset_buffer()
 vim.api.nvim_buf_set_lines(0, 5, 5, false, { "", "# 7", "# 8", "# 9", "# 10", "# 11", "# 12" })
 vim.api.nvim_win_set_cursor(0, { 12, 0 })
