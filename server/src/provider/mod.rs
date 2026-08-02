@@ -67,6 +67,9 @@ line N without changing it, use start_line = end_line = N and include line N's \
 current text in the replacement.
 - Prefer one small, high-confidence edit at or near the cursor. Do not rewrite \
 code the user has not touched.
+- The edit may target the excerpt or any \"related region\" shown; use a \
+related region when the user's last edit clearly needs the same change there \
+(a renamed function's remaining call site, say).
 - Match the file's existing style exactly (indentation, naming, quoting).
 - Diagnostics, when present, usually point at the fix the user is about to \
 make; an edit that resolves one near the cursor is a strong prediction.
@@ -110,6 +113,7 @@ pub(crate) fn examples() -> &'static [(String, String)] {
             }],
             diagnostics: vec!["line 16 [ERROR]: undefined name 'get_user'".into()],
             outline: vec![],
+            extra_regions: vec![],
         };
         let rename_edit = "{\"has_edit\": true, \"start_line\": 16, \"end_line\": 16, \
              \"replacement\": \"    user = fetch_user(req.id)\"}";
@@ -131,6 +135,7 @@ pub(crate) fn examples() -> &'static [(String, String)] {
             }],
             diagnostics: vec![],
             outline: vec![],
+            extra_regions: vec![],
         };
         let no_edit =
             "{\"has_edit\": false, \"start_line\": 0, \"end_line\": 0, \"replacement\": \"\"}";
@@ -231,6 +236,12 @@ pub(crate) fn user_prompt(p: &PredictParams) -> String {
             let _ = writeln!(s, "{n:5}| {line}");
         }
     }
+    for r in &p.extra_regions {
+        s.push_str("\nRelated region elsewhere in the file (also editable):\n");
+        for (i, line) in r.lines.iter().enumerate() {
+            let _ = writeln!(s, "{:5}| {}", r.start + i, line);
+        }
+    }
     if !p.diagnostics.is_empty() {
         s.push_str("\nDiagnostics in the excerpt:\n");
         for d in &p.diagnostics {
@@ -295,6 +306,42 @@ mod tests {
     }
 
     #[test]
+    fn validate_accepts_edit_inside_an_extra_region() {
+        let p = PredictParams {
+            path: "f.py".into(),
+            filetype: "python".into(),
+            cursor_line: 10,
+            cursor_col: 0,
+            excerpt_start: 10,
+            excerpt_lines: vec!["def fetch_user(id):".into()],
+            recent_edits: vec![],
+            diagnostics: vec![],
+            outline: vec![],
+            extra_regions: vec![crate::protocol::Region {
+                start: 200,
+                lines: vec!["x = get_user(1)".into()],
+            }],
+        };
+        let edit = ModelEdit {
+            has_edit: true,
+            start_line: 200,
+            end_line: 200,
+            replacement: "x = fetch_user(1)".into(),
+        };
+        let pred = validate(edit, &p);
+        assert!(pred.has_edit);
+        assert_eq!((pred.start_line, pred.end_line), (200, 200));
+        // ...but an edit outside every region is rejected.
+        let stray = ModelEdit {
+            has_edit: true,
+            start_line: 150,
+            end_line: 150,
+            replacement: "whatever".into(),
+        };
+        assert!(!validate(stray, &p).has_edit);
+    }
+
+    #[test]
     fn examples_render_in_the_live_prompt_format() {
         let ex = examples();
         assert_eq!(ex.len(), 2);
@@ -304,16 +351,23 @@ mod tests {
     }
 }
 
-/// Clamp the model's edit to the excerpt and drop no-ops.
+/// Clamp the model's edit to lines it was actually shown — the excerpt or one
+/// extra region — and drop no-ops.
 pub(crate) fn validate(edit: ModelEdit, p: &PredictParams) -> Prediction {
-    if !edit.has_edit {
+    if !edit.has_edit || edit.start_line > edit.end_line {
         return Prediction::none();
     }
-    let first = p.excerpt_start;
-    let last = p.excerpt_start + p.excerpt_lines.len().saturating_sub(1);
-    if edit.start_line < first || edit.end_line > last || edit.start_line > edit.end_line {
+    // The region (excerpt or extra) that fully contains the edit.
+    let regions = std::iter::once((p.excerpt_start, &p.excerpt_lines))
+        .chain(p.extra_regions.iter().map(|r| (r.start, &r.lines)));
+    let Some((start, lines)) = regions
+        .filter(|(start, lines)| {
+            edit.start_line >= *start && edit.end_line <= start + lines.len().saturating_sub(1)
+        })
+        .next()
+    else {
         return Prediction::none();
-    }
+    };
     // Models occasionally echo the cursor marker back; it is never buffer text.
     let replacement = edit.replacement.replace(CURSOR_MARKER, "");
     let replacement: Vec<String> = if replacement.is_empty() {
@@ -321,7 +375,7 @@ pub(crate) fn validate(edit: ModelEdit, p: &PredictParams) -> Prediction {
     } else {
         replacement.split('\n').map(str::to_string).collect()
     };
-    let current = &p.excerpt_lines[edit.start_line - first..=edit.end_line - first];
+    let current = &lines[edit.start_line - start..=edit.end_line - start];
     if current == replacement.as_slice() {
         return Prediction::none();
     }

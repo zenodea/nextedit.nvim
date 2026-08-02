@@ -376,6 +376,7 @@ mod tests {
             cursor_col: "editable".len(),
             diagnostics: vec![],
             outline: vec![],
+            extra_regions: vec![],
             excerpt_start: 1,
             excerpt_lines: lines(&["prefix", "editable", "suffix"]),
             recent_edits: vec![crate::protocol::RecentEdit {
