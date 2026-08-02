@@ -17,9 +17,17 @@ automatically, so repetitive changes become Tab, Tab, Tab.
 
 ## Features
 
-- **Edit-history-aware predictions**: your recent edits are coalesced into
-  semantic edits — one entry per rename or change, not per keystroke — and
-  sent as diffs, which is what makes it "next edit" rather than autocomplete
+- **Edit-history-aware predictions**: your recent edits — across *all* open
+  buffers — are coalesced into semantic edits, one entry per rename or
+  change, not per keystroke, and sent as diffs; that is what makes it "next
+  edit" rather than autocomplete, and what lets a rename in one file fix
+  call sites in another
+- **Whole-file reach**: a treesitter outline shows the model the file's
+  structure, and lines still containing identifiers your edits removed are
+  sent as extra editable regions — predictions can land far from the
+  cursor, marked with a `»` sign and reached with tab-to-jump
+- **Respects your no**: explicitly dismissed suggestions are remembered and
+  not re-proposed until the underlying lines change
 - **Diagnostics-aware**: errors and warnings near the cursor go into the
   prompt; a diagnostic where you just edited is the strongest next-edit
   signal there is
@@ -189,8 +197,18 @@ require("nextedit").setup({
   model = nil,           -- provider-specific model name
   api_url = nil,         -- override the provider's endpoint
   api_key = nil,         -- prefer the provider's env var; for keyless local setups
+  filetypes = { gitcommit = false, gitrebase = false, help = false },
+                         -- per-filetype toggle; unlisted filetypes are enabled
+  deny_paths = { "%.env", "%.pem$", "secret", "credential" },
+                         -- never predict in files matching these Lua patterns
+                         -- (secrets should not reach an API); overrides replace the list
+  max_lines = 10000,     -- skip buffers larger than this
 })
 ```
+
+For statuslines, `require("nextedit").status()` returns
+`{ provider, inflight, last_error }`. Request errors are notified once per
+failure streak, not per request.
 
 Examples:
 
@@ -253,20 +271,21 @@ A prediction cycle:
 
 ## Roadmap
 
-- Cross-file context: other open buffers in the prompt, so renames propagate
-  across files
+- Cross-file excerpts: related regions from *other* buffers, not just edit
+  history
 - Treesitter syntax highlighting inside the diff overlay
 - Multiple edits per prediction (a chain of locations from one request)
 - Prompt caching and streaming for lower latency
 - Partial accept (word or line at a time)
 - Incremental edit tracking instead of whole-buffer snapshots
+- Local accept/dismiss stats to measure prediction quality per provider
 
 ## Limitations (deliberate, for now)
 
-- One prediction at a time, within the excerpt around the cursor
-- Whole-buffer snapshot per commit; fine for normal files, wasteful for huge
-  ones
-- No streaming, no caching, no cross-file context
+- One prediction at a time; editable regions are the cursor excerpt plus the
+  detected related sites, all within the current file
+- Whole-buffer snapshot per commit; buffers beyond `max_lines` are skipped
+- No streaming, no caching
 
 ## License
 
