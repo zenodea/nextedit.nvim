@@ -1,0 +1,174 @@
+*nextedit.txt*  Next-edit prediction for Neovim
+
+Author:  Zeno de Angeli
+License: MIT
+
+==============================================================================
+CONTENTS                                                    *nextedit-contents*
+
+  1. Introduction ................................ |nextedit-introduction|
+  2. Requirements ................................ |nextedit-requirements|
+  3. Setup ....................................... |nextedit-setup|
+  4. Usage ....................................... |nextedit-usage|
+  5. Commands .................................... |nextedit-commands|
+  6. Configuration ............................... |nextedit-configuration|
+  7. Providers ................................... |nextedit-providers|
+  8. Highlights .................................. |nextedit-highlights|
+  9. Statusline .................................. |nextedit-statusline|
+
+==============================================================================
+1. INTRODUCTION                                         *nextedit-introduction*
+
+nextedit.nvim predicts the edit you are about to make, based on the edits you
+have been making, and shows it as a diff overlay you accept with a key.
+
+Unlike completion plugins, which guess the text that continues at the cursor,
+next-edit prediction watches your recent changes. Rename a variable and it
+offers the same rename at the next usage, in this file or another open one.
+Change a signature and it offers to fix the call sites. Accepting an edit
+requests the next prediction, so repetitive changes chain.
+
+==============================================================================
+2. REQUIREMENTS                                         *nextedit-requirements*
+
+- Neovim 0.10 or newer.
+- A Rust toolchain, to build the sidecar server. Not needed when using the
+  `copilot-nes` provider.
+- Credentials for the chosen provider, or a local model server.
+- For `copilot-nes`: the copilot-language-server binary. Easiest is adding
+  zbirenbaum/copilot.lua as a plugin dependency (its bundled server is found
+  automatically and needs Node 22+). Alternatives: >
+    npm install -g @github/copilot-language-server
+    :MasonInstall copilot-language-server
+<
+==============================================================================
+3. SETUP                                                       *nextedit-setup*
+
+With lazy.nvim: >lua
+  {
+    "zenodea/nextedit.nvim",
+    build = "cd server && cargo build --release",
+    config = function()
+      require("nextedit").setup()
+    end,
+  }
+<
+For Copilot's native next-edit model, no Rust build is needed: >lua
+  {
+    "zenodea/nextedit.nvim",
+    dependencies = { "zbirenbaum/copilot.lua" },
+    config = function()
+      require("nextedit").setup({ provider = "copilot-nes" })
+    end,
+  }
+<
+==============================================================================
+4. USAGE                                                       *nextedit-usage*
+
+Predictions are requested at edit boundaries: leaving insert mode, or a
+normal-mode change. With fast providers (mercury, ollama, zeta) they are also
+requested as you type; see the `trigger` option.
+
+After a short debounce a prediction may appear. Small changes render as
+word-level inline diffs; larger ones highlight the old lines and show the new
+lines below. A `»` sign marks the first changed line.
+
+Default keys (normal mode; also insert mode with `trigger = "typing"`):
+
+  <Tab>   Accept the prediction. If it is more than a few lines away, or in
+          another buffer, the first press jumps to it and the second applies
+          it. Falls through to the normal <Tab> when nothing is shown.
+  <C-]>   Dismiss the prediction. Dismissed suggestions are remembered and
+          not shown again until the underlying lines change. Undoing an
+          accepted prediction counts as a dismissal too.
+  <Esc>   Dismiss (normal mode).
+
+While a completion menu is open, the preview moves above the change so the
+menu does not cover it.
+
+==============================================================================
+5. COMMANDS                                                 *nextedit-commands*
+
+  :NextEdit          Request a prediction now.
+  :NextEditRestart   Restart the sidecar server.
+  :NextEditSignIn    GitHub device-code sign-in (`copilot-nes` only).
+  :checkhealth nextedit
+                     Diagnose binary, server and credential problems.
+
+==============================================================================
+6. CONFIGURATION                                       *nextedit-configuration*
+
+Defaults: >lua
+  require("nextedit").setup({
+    trigger = nil,       -- "boundary" or "typing"; defaults per provider
+    debounce_ms = 150,   -- pause before a request is sent
+    context_lines = 40,  -- buffer lines sent above and below the cursor
+    accept_key = "<Tab>",
+    dismiss_key = "<C-]>",
+    server_cmd = nil,    -- override the sidecar binary
+    provider = nil,      -- see |nextedit-providers|
+    model = nil,         -- provider-specific model name
+    api_url = nil,       -- override the provider endpoint
+    api_key = nil,       -- prefer the provider's env var
+    filetypes = { gitcommit = false, gitrebase = false, help = false },
+    deny_paths = { "%.env", "%.pem$", "secret", "credential" },
+    max_lines = 10000,   -- skip larger buffers
+  })
+<
+`trigger`      "boundary" requests predictions when you leave insert mode or
+               change text in normal mode. "typing" also requests them as you
+               type. Defaults to "typing" for mercury, ollama and zeta, and
+               "boundary" for everything else.
+
+`filetypes`    Table of filetype = boolean. Unlisted filetypes are enabled.
+
+`deny_paths`   Lua patterns matched against the lowercased file path. Files
+               matching any pattern never produce requests, so secrets are
+               not sent to an API. Setting this replaces the default list.
+
+The same settings are read from the environment: NEXTEDIT_PROVIDER,
+NEXTEDIT_MODEL, NEXTEDIT_API_URL, NEXTEDIT_API_KEY.
+
+==============================================================================
+7. PROVIDERS                                               *nextedit-providers*
+
+  provider      endpoint (default)        default model       credentials ~
+  anthropic     api.anthropic.com         claude-haiku-4-5    ANTHROPIC_API_KEY
+  copilot       api.githubcopilot.com     gpt-4.1             Copilot sign-in
+  copilot-nes   local Copilot LSP         Copilot NES model   Copilot sign-in
+  openai        api.openai.com/v1         gpt-5-mini          OPENAI_API_KEY
+  mercury       api.inceptionlabs.ai/v1   mercury-2           INCEPTION_API_KEY
+  gemini        Google OpenAI endpoint    gemini-2.5-flash    GEMINI_API_KEY
+  xai           api.x.ai/v1               grok-code-fast-1    XAI_API_KEY
+  mistral       api.mistral.ai/v1         codestral-latest    MISTRAL_API_KEY
+  openrouter    openrouter.ai/api/v1      gemini-2.5-flash-lite OPENROUTER_API_KEY
+  ollama        localhost:11434/v1        qwen2.5-coder:7b    none
+  zeta / zeta2  localhost:11434/v1        zeta / zeta2        none
+
+`openai` works with any OpenAI-compatible chat completions server; point
+`api_url` at llama.cpp, vLLM, LM Studio and similar. `copilot-nes` talks LSP
+to copilot-language-server and does not use the sidecar. `zeta` and `zeta2`
+speak the native editable-region formats of Zed's Zeta models. See the README
+for details on each.
+
+==============================================================================
+8. HIGHLIGHTS                                             *nextedit-highlights*
+
+  NextEditOld    Lines or spans the prediction replaces.  Links to DiffDelete.
+  NextEditNew    Proposed text.  Links to DiffAdd.
+  NextEditSign   The `»` gutter sign.  Links to DiagnosticSignInfo.
+
+==============================================================================
+9. STATUSLINE                                             *nextedit-statusline*
+
+`require("nextedit").status()` returns a table: >lua
+  {
+    provider = "mercury",   -- resolved provider name
+    inflight = false,       -- request currently running
+    last_error = nil,       -- last request error, nil when healthy
+  }
+<
+Request errors are notified once per failure streak, then muted until a
+request succeeds again.
+
+vim:tw=78:ts=8:noet:ft=help:norl:
