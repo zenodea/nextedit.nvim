@@ -104,9 +104,10 @@ pub(crate) fn examples() -> &'static [(String, String)] {
                 "    user = get_user(req.id)",
                 "    return render(user)",
             ]),
-            recent_edits: vec![
-                "@@ -12,2 +12,2 @@\n-def get_user(id):\n+def fetch_user(id):\n     return db.lookup(id)\n".into(),
-            ],
+            recent_edits: vec![crate::protocol::RecentEdit {
+                path: "src/user.py".into(),
+                diff: "@@ -12,2 +12,2 @@\n-def get_user(id):\n+def fetch_user(id):\n     return db.lookup(id)\n".into(),
+            }],
             diagnostics: vec!["line 16 [ERROR]: undefined name 'get_user'".into()],
         };
         let rename_edit = "{\"has_edit\": true, \"start_line\": 16, \"end_line\": 16, \
@@ -123,9 +124,10 @@ pub(crate) fn examples() -> &'static [(String, String)] {
                 "def area(r):",
                 "    return math.pi * r ** 2",
             ]),
-            recent_edits: vec![
-                "@@ -3,1 +3,2 @@\n def area(r):\n+    return math.pi * r ** 2\n".into(),
-            ],
+            recent_edits: vec![crate::protocol::RecentEdit {
+                path: "src/circle.py".into(),
+                diff: "@@ -3,1 +3,2 @@\n def area(r):\n+    return math.pi * r ** 2\n".into(),
+            }],
             diagnostics: vec![],
         };
         let no_edit =
@@ -210,7 +212,7 @@ pub(crate) fn user_prompt(p: &PredictParams) -> String {
         s.push_str("(none)\n");
     }
     for d in &p.recent_edits {
-        let _ = writeln!(s, "```diff\n{}\n```", d.trim_end());
+        let _ = writeln!(s, "User edited {}:\n```diff\n{}\n```", d.path, d.diff.trim_end());
     }
     let _ = writeln!(s, "\nBuffer excerpt ({CURSOR_MARKER} marks the cursor):");
     for (i, line) in p.excerpt_lines.iter().enumerate() {

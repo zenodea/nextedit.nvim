@@ -11,10 +11,14 @@ local MAX_EDITS = 6
 local REGION_GAP = 5 -- commits further than this many lines apart start a new entry
 local MERGE_WINDOW_MS = 10000 -- and so do commits after this long a pause
 
-local state = {} -- buf -> { baseline, history = { {base, diff, region = {first, last}, at}, ... } }
+local state = {} -- buf -> { baseline, history = { {base, path, diff, region = {first, last}, at}, ... } }
 
 local function buffer_text(buf)
 	return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n") .. "\n"
+end
+
+local function buffer_path(buf)
+	return vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ":.")
 end
 
 local function ensure(buf)
@@ -66,6 +70,7 @@ function M.commit(buf)
 	else
 		table.insert(s.history, {
 			base = s.baseline,
+			path = buffer_path(buf),
 			diff = vim.diff(s.baseline, text, { ctxlen = 2 }),
 			region = region,
 			at = now,
@@ -77,19 +82,30 @@ function M.commit(buf)
 	s.baseline = text
 end
 
---- The recent-edit history, oldest first, plus the uncommitted in-progress
---- edit (if any) as the final entry.
+--- The recent-edit history as { path, diff } entries, oldest first, plus the
+--- uncommitted in-progress edit (if any) as the final entry. The history
+--- spans *all* buffers — a rename in one file is exactly the context needed
+--- to fix its call sites in another — capped to the most recent MAX_EDITS.
 function M.take(buf)
-	local s = ensure(buf)
-	local edits = {}
-	for _, entry in ipairs(s.history) do
-		edits[#edits + 1] = entry.diff
+	local entries = {}
+	for _, s in pairs(state) do
+		for _, entry in ipairs(s.history) do
+			entries[#entries + 1] = entry
+		end
 	end
+	table.sort(entries, function(a, b)
+		return a.at < b.at
+	end)
+	local edits = {}
+	for i = math.max(1, #entries - MAX_EDITS + 1), #entries do
+		edits[#edits + 1] = { path = entries[i].path, diff = entries[i].diff }
+	end
+	local s = ensure(buf)
 	local text = buffer_text(buf)
 	if text ~= s.baseline then
 		local pending = vim.diff(s.baseline, text, { ctxlen = 2 })
 		if pending and pending ~= "" then
-			edits[#edits + 1] = pending
+			edits[#edits + 1] = { path = buffer_path(buf), diff = pending }
 		end
 	end
 	return edits

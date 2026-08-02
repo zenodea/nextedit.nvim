@@ -19,11 +19,19 @@ pub struct PredictParams {
     /// Absolute 1-indexed line number of `excerpt_lines[0]`.
     pub excerpt_start: usize,
     pub excerpt_lines: Vec<String>,
-    /// Unified diffs of the user's recent edits, oldest first.
-    pub recent_edits: Vec<String>,
+    /// The user's recent edits, oldest first — possibly from other files.
+    pub recent_edits: Vec<RecentEdit>,
     /// Error/warning diagnostics inside the excerpt, pre-formatted one per line.
     #[serde(default)]
     pub diagnostics: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct RecentEdit {
+    /// Path of the file the edit happened in (not necessarily the current one).
+    pub path: String,
+    /// Unified diff of the edit.
+    pub diff: String,
 }
 
 /// One JSON object per line on stdout.
