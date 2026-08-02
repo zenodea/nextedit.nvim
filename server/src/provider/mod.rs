@@ -109,6 +109,7 @@ pub(crate) fn examples() -> &'static [(String, String)] {
                 diff: "@@ -12,2 +12,2 @@\n-def get_user(id):\n+def fetch_user(id):\n     return db.lookup(id)\n".into(),
             }],
             diagnostics: vec!["line 16 [ERROR]: undefined name 'get_user'".into()],
+            outline: vec![],
         };
         let rename_edit = "{\"has_edit\": true, \"start_line\": 16, \"end_line\": 16, \
              \"replacement\": \"    user = fetch_user(req.id)\"}";
@@ -129,6 +130,7 @@ pub(crate) fn examples() -> &'static [(String, String)] {
                 diff: "@@ -3,1 +3,2 @@\n def area(r):\n+    return math.pi * r ** 2\n".into(),
             }],
             diagnostics: vec![],
+            outline: vec![],
         };
         let no_edit =
             "{\"has_edit\": false, \"start_line\": 0, \"end_line\": 0, \"replacement\": \"\"}";
@@ -213,6 +215,12 @@ pub(crate) fn user_prompt(p: &PredictParams) -> String {
     }
     for d in &p.recent_edits {
         let _ = writeln!(s, "User edited {}:\n```diff\n{}\n```", d.path, d.diff.trim_end());
+    }
+    if !p.outline.is_empty() {
+        s.push_str("\nFile outline (definitions across the whole file):\n");
+        for line in &p.outline {
+            let _ = writeln!(s, "{line}");
+        }
     }
     let _ = writeln!(s, "\nBuffer excerpt ({CURSOR_MARKER} marks the cursor):");
     for (i, line) in p.excerpt_lines.iter().enumerate() {
