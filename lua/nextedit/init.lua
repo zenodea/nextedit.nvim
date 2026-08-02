@@ -1,5 +1,6 @@
 local diff = require("nextedit.diff")
 local nes = require("nextedit.nes")
+local outline = require("nextedit.outline")
 local server = require("nextedit.server")
 local track = require("nextedit.track")
 local ui = require("nextedit.ui")
@@ -192,6 +193,7 @@ local function request_prediction()
     excerpt_lines = vim.api.nvim_buf_get_lines(buf, first - 1, last, false),
     recent_edits = diff.take(buf),
     diagnostics = excerpt_diagnostics(buf, first, last),
+    outline = outline.get(buf),
   }
   track.begin(buf)
   local id = server.predict(params, function(result, err)

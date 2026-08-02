@@ -47,6 +47,18 @@ diffmod.commit(dbuf)
 check("history: distant commit starts a new entry", #diffmod.take(dbuf), 2)
 diffmod.forget(dbuf)
 
+-- Outline: definition nodes from treesitter, numbered with absolute lines.
+local outline = require("nextedit.outline")
+local obuf = vim.api.nvim_create_buf(false, true)
+vim.api.nvim_buf_set_lines(obuf, 0, -1, false, {
+  "local function foo()", "end", "", "local function bar()", "end",
+})
+vim.bo[obuf].filetype = "lua"
+local o = outline.get(obuf)
+check("outline: finds both functions", #o, 2)
+check("outline: entries carry absolute line numbers",
+  o[2]:match("^%s*4|") ~= nil and o[2]:match("bar") ~= nil, true)
+
 -- Rendering: small word changes are inline, rewrites fall back to block style.
 local render = require("nextedit.render")
 local inline = render.extmarks({ "local foo = 1" }, { "local bar = 1" }, 10)

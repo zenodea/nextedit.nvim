@@ -24,6 +24,9 @@ pub struct PredictParams {
     /// Error/warning diagnostics inside the excerpt, pre-formatted one per line.
     #[serde(default)]
     pub diagnostics: Vec<String>,
+    /// Numbered definition lines outlining the whole file, pre-formatted.
+    #[serde(default)]
+    pub outline: Vec<String>,
 }
 
 #[derive(Deserialize)]
