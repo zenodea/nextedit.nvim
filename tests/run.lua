@@ -224,6 +224,99 @@ check("crossbuf: current buffer is the target", vim.api.nvim_get_current_buf(), 
 check("crossbuf: second accept applies", ui.accept(), true)
 check("crossbuf: line replaced", vim.api.nvim_buf_get_lines(other, 1, 2, false), { "BETA" })
 
+-- 7. Runtime control: a disabled plugin or buffer requests nothing.
+vim.api.nvim_set_current_buf(origin)
+local nextedit = require("nextedit")
+reset_buffer()
+nextedit.disable()
+check("toggle: status reports disabled", nextedit.status().enabled, false)
+vim.cmd.NextEdit()
+check("toggle: no prediction while disabled", vim.wait(800, ui.visible, 10), false)
+nextedit.enable()
+check("toggle: status reports enabled", nextedit.status().enabled, true)
+check("toggle: predictions return once enabled", predict_and_wait(), true)
+ui.dismiss()
+
+reset_buffer()
+vim.b.nextedit_disable = true
+vim.cmd.NextEdit()
+check("bufdisable: no prediction in a disabled buffer", vim.wait(800, ui.visible, 10), false)
+vim.b.nextedit_disable = nil
+check("bufdisable: predictions return when cleared", predict_and_wait(), true)
+ui.dismiss()
+
+-- 8. regions.configure caps how many regions are collected.
+local mbuf = vim.api.nvim_create_buf(false, true)
+local mlines = { "def fetch_user(id):", "    pass" }
+for _ = 1, 10 do
+  mlines[#mlines + 1] = ""
+end
+mlines[#mlines + 1] = "a = get_user(1)"
+for _ = 1, 10 do
+  mlines[#mlines + 1] = ""
+end
+mlines[#mlines + 1] = "b = get_user(2)"
+vim.api.nvim_buf_set_lines(mbuf, 0, -1, false, mlines)
+local medit = { { path = "m.py", diff = "@@ -1,1 +1,1 @@\n-def get_user(id):\n+def fetch_user(id):" } }
+regionsmod.configure({ max_regions = 1 })
+check("regions: configure caps the region count", #regionsmod.find(mbuf, medit, 1, 4), 1)
+regionsmod.configure({ max_regions = 4 })
+check("regions: restored cap finds both sites", #regionsmod.find(mbuf, medit, 1, 4), 2)
+
+-- 9. ui.configure: sign_text and jump_distance are honored.
+local ui_ns = vim.api.nvim_get_namespaces().nextedit
+local function sign_shown()
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(0, ui_ns, 0, -1, { details = true })) do
+    if m[4].sign_text then
+      return true
+    end
+  end
+  return false
+end
+reset_buffer()
+ui.configure({ sign_text = "" })
+ui.show(0, { start_line = 4, end_line = 4, replacement = { "def sub(s):" } }, vim.b[0].changedtick)
+check("configure: empty sign_text renders no sign", sign_shown(), false)
+ui.dismiss()
+ui.configure({ sign_text = "»" })
+ui.show(0, { start_line = 4, end_line = 4, replacement = { "def sub(s):" } }, vim.b[0].changedtick)
+check("configure: sign is back with sign_text set", sign_shown(), true)
+ui.dismiss()
+
+reset_buffer()
+ui.configure({ jump_distance = 0 })
+vim.api.nvim_win_set_cursor(0, { 5, 0 })
+ui.show(0, { start_line = 4, end_line = 4, replacement = { "def sub(j):" } }, vim.b[0].changedtick)
+check("configure: accept jumps beyond a zero jump_distance", ui.accept(), true)
+check("configure: cursor jumped to the prediction", vim.api.nvim_win_get_cursor(0)[1], 4)
+check("configure: second accept applies", ui.accept(), true)
+check("configure: line replaced", vim.api.nvim_buf_get_lines(0, 3, 4, false), { "def sub(j):" })
+ui.configure({ jump_distance = 5 })
+
+-- 10. multiline = false drops predictions that span lines.
+require("nextedit.server").stop()
+require("nextedit").setup({
+  server_cmd = { root .. "/tests/fake-server.py", "--multiline" },
+  debounce_ms = 3600000,
+  multiline = false,
+})
+reset_buffer()
+vim.cmd.NextEdit()
+check("multiline: spanning prediction is dropped", vim.wait(1200, ui.visible, 10), false)
+require("nextedit.server").stop()
+require("nextedit").setup({
+  server_cmd = { root .. "/tests/fake-server.py", "--multiline" },
+  debounce_ms = 3600000,
+})
+reset_buffer()
+check("multiline: allowed by default", predict_and_wait(), true)
+check("multiline: two-line replacement applies", ui.accept(), true)
+check(
+  "multiline: buffer grew a line",
+  vim.api.nvim_buf_get_lines(0, 3, 5, false),
+  { "def sub(a: int, b: int) -> int:", "    return int(a - b)" }
+)
+
 if failures > 0 then
   print(failures .. " failure(s)")
   vim.cmd.cquit()
