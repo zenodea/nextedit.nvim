@@ -120,6 +120,8 @@ Defaults: >lua
     max_regions = 4,     -- related regions sent as extra editable context
     accept_key = "<Tab>",
     dismiss_key = "<C-]>",
+    jump_distance = 5,   -- accept jumps first beyond this distance
+    sign_text = "»",     -- gutter sign marking a prediction; "" disables
     server_cmd = nil,    -- override the sidecar binary
     provider = nil,      -- see |nextedit-providers|
     model = nil,         -- provider-specific model name
@@ -147,6 +149,13 @@ Defaults: >lua
 
 `multiline`    When false, predictions that replace more than one line, or
                whose replacement spans more than one line, are dropped.
+
+`jump_distance` A prediction farther than this many lines from the cursor is
+               not applied outright: the first accept jumps to it, the
+               second applies it.
+
+`sign_text`    The gutter sign marking the first changed line of a pending
+               prediction. Set to "" to show no sign.
 
 `diagnostics_severity`
                The least severe diagnostic level still sent with the

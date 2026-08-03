@@ -8,9 +8,18 @@ local M = {}
 local ns = vim.api.nvim_create_namespace("nextedit")
 local current = nil -- { buf, start_line, end_line, replacement, tick, jump_pos }
 
--- Predictions further than this many lines from the cursor are not applied
--- outright: the first accept jumps to them, the second applies.
-local JUMP_DISTANCE = 5
+local config = {
+  -- Predictions further than this many lines from the cursor are not applied
+  -- outright: the first accept jumps to them, the second applies.
+  jump_distance = 5,
+  -- Gutter sign marking the first changed line; "" disables it.
+  sign_text = "»",
+}
+
+--- Overrides from setup().
+function M.configure(o)
+  config = vim.tbl_extend("force", config, o)
+end
 
 --- Whether a completion menu is on screen. It floats over the lines right
 --- below the cursor — where the preview normally renders — so the preview
@@ -80,10 +89,12 @@ function M.show(buf, pred, tick)
   end
   -- A sign marks the first changed line, so a prediction outside the
   -- immediate eye line is still discoverable.
-  vim.api.nvim_buf_set_extmark(buf, ns, marks[1][1], 0, {
-    sign_text = "»",
-    sign_hl_group = "NextEditSign",
-  })
+  if config.sign_text ~= "" then
+    vim.api.nvim_buf_set_extmark(buf, ns, marks[1][1], 0, {
+      sign_text = config.sign_text,
+      sign_hl_group = "NextEditSign",
+    })
+  end
   current = {
     buf = buf,
     start_line = pred.start_line,
@@ -188,7 +199,7 @@ function M.accept()
   local win = vim.api.nvim_get_current_win()
   if vim.api.nvim_win_get_buf(win) == c.buf then
     local lnum = vim.api.nvim_win_get_cursor(win)[1]
-    if math.max(c.start_line - lnum, lnum - c.end_line) > JUMP_DISTANCE then
+    if math.max(c.start_line - lnum, lnum - c.end_line) > config.jump_distance then
       vim.cmd("normal! m'") -- <C-o> returns to where the user was
       pcall(vim.api.nvim_win_set_cursor, win, c.jump_pos)
       return true
