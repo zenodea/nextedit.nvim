@@ -23,6 +23,11 @@ local defaults = {
   multiline = true, -- false shows only single-line predictions
   debounce_ms = 150,
   context_lines = 40, -- buffer context sent above and below the cursor
+  max_diagnostics = 8, -- diagnostics sent alongside the excerpt
+  diagnostics_severity = "warn", -- least severe diagnostic level still sent: "error", "warn", "info" or "hint"
+  outline = true, -- send a treesitter outline of the whole file
+  cross_file = true, -- let predictions target other open buffers
+  max_regions = 4, -- related regions sent as extra editable context
   accept_key = "<Tab>",
   dismiss_key = "<C-]>",
   server_cmd = nil, -- defaults to the bundled Rust binary
@@ -180,12 +185,13 @@ end
 --- edit" signal there is.
 local function excerpt_diagnostics(buf, first, last)
   local out = {}
+  local floor = vim.diagnostic.severity[opts.diagnostics_severity:upper()] or vim.diagnostic.severity.WARN
   for _, d in ipairs(vim.diagnostic.get(buf)) do
     local lnum = d.lnum + 1
-    if lnum >= first and lnum <= last and d.severity <= vim.diagnostic.severity.WARN then
+    if lnum >= first and lnum <= last and d.severity <= floor then
       local severity = vim.diagnostic.severity[d.severity] or "?"
       out[#out + 1] = ("line %d [%s]: %s"):format(lnum, severity, d.message:gsub("%s+", " "))
-      if #out >= 8 then
+      if #out >= opts.max_diagnostics then
         break
       end
     end
@@ -270,11 +276,18 @@ local function request_prediction(kind)
     excerpt_lines = vim.api.nvim_buf_get_lines(buf, first - 1, last, false),
     recent_edits = recent_edits,
     diagnostics = diagnostics,
-    outline = outline.get(buf),
+    outline = opts.outline and outline.get(buf) or nil,
   }
   -- Candidate sites the recent edits point at, in this file or another open
   -- buffer; lets the prediction land far from the cursor, with tab-to-jump.
-  local found = regions.find(buf, params.recent_edits, first, last, enabled)
+  -- With cross_file off, other buffers are excluded from the search.
+  local allow = enabled
+  if not opts.cross_file then
+    allow = function(b)
+      return b == buf and enabled(b)
+    end
+  end
+  local found = regions.find(buf, params.recent_edits, first, last, allow)
   local targets = {} -- path -> bufnr, for routing a cross-file prediction
   params.extra_regions = {}
   for _, r in ipairs(found) do
@@ -355,6 +368,8 @@ function M.setup(user_opts)
   if user_opts and user_opts.deny_paths then
     opts.deny_paths = user_opts.deny_paths
   end
+
+  regions.configure({ max_regions = opts.max_regions })
 
   vim.api.nvim_set_hl(0, "NextEditOld", { default = true, link = "DiffDelete" })
   vim.api.nvim_set_hl(0, "NextEditNew", { default = true, link = "DiffAdd" })

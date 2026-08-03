@@ -13,7 +13,7 @@
 -- can land far from the cursor or in another file; the UI offers tab-to-jump.
 local M = {}
 
-local MAX_REGIONS = 4
+local max_regions = 4
 local MAX_BUFFERS = 8
 local CONTEXT = 3
 local MAX_RECENT = 3 -- only mine the newest edits; old ones are stale signal
@@ -62,7 +62,12 @@ local function contains_any(text, tokens)
   return false
 end
 
---- Up to MAX_REGIONS excerpts ({ bufnr, path, start, lines }) around lines
+--- Overrides from setup(); only the region cap is tunable so far.
+function M.configure(o)
+  max_regions = o.max_regions or max_regions
+end
+
+--- Up to max_regions excerpts ({ bufnr, path, start, lines }) around lines
 --- that still contain an identifier the recent edits removed. Looks in the
 --- origin buffer outside [first, last] and in other loaded buffers that pass
 --- `allowed` (the caller's own enablement rules, so denied files stay out).
@@ -123,7 +128,7 @@ function M.find(buf, edits, first, last, allowed)
   -- Merge each buffer's hits into context regions, capped overall.
   local regions = {}
   for _, bufnr in ipairs(order) do
-    if #regions >= MAX_REGIONS then
+    if #regions >= max_regions then
       break
     end
     local lnums = hits[bufnr]
@@ -135,7 +140,7 @@ function M.find(buf, edits, first, last, allowed)
       local s, e = math.max(1, lnum - CONTEXT), math.min(line_count, lnum + CONTEXT)
       if prev and prev.bufnr == bufnr and s <= prev.stop + 1 then
         prev.stop = math.max(prev.stop, e)
-      elseif #regions < MAX_REGIONS then
+      elseif #regions < max_regions then
         prev = { bufnr = bufnr, path = path, start = s, stop = e }
         regions[#regions + 1] = prev
       end

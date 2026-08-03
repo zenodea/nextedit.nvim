@@ -175,6 +175,13 @@ require("nextedit").setup({
   multiline = true,      -- false shows only single-line predictions
   debounce_ms = 150,     -- pause before a request is sent
   context_lines = 40,    -- buffer lines sent above and below the cursor
+  max_diagnostics = 8,   -- diagnostics sent alongside the excerpt
+  diagnostics_severity = "warn",
+                         -- least severe diagnostic level still sent:
+                         -- "error", "warn", "info" or "hint"
+  outline = true,        -- send a treesitter outline of the whole file
+  cross_file = true,     -- let predictions target other open buffers
+  max_regions = 4,       -- related regions sent as extra editable context
   accept_key = "<Tab>",
   dismiss_key = "<C-]>",
   server_cmd = nil,      -- override the sidecar binary

@@ -113,6 +113,11 @@ Defaults: >lua
     multiline = true,    -- false shows only single-line predictions
     debounce_ms = 150,   -- pause before a request is sent
     context_lines = 40,  -- buffer lines sent above and below the cursor
+    max_diagnostics = 8, -- diagnostics sent alongside the excerpt
+    diagnostics_severity = "warn",  -- least severe level still sent
+    outline = true,      -- send a treesitter outline of the whole file
+    cross_file = true,   -- let predictions target other open buffers
+    max_regions = 4,     -- related regions sent as extra editable context
     accept_key = "<Tab>",
     dismiss_key = "<C-]>",
     server_cmd = nil,    -- override the sidecar binary
@@ -142,6 +147,19 @@ Defaults: >lua
 
 `multiline`    When false, predictions that replace more than one line, or
                whose replacement spans more than one line, are dropped.
+
+`diagnostics_severity`
+               The least severe diagnostic level still sent with the
+               excerpt: "error", "warn" (the default), "info" or "hint".
+
+`outline`      Whether a treesitter outline of the whole file accompanies
+               the excerpt.
+
+`cross_file`   When false, related regions are collected from the current
+               buffer only, so predictions never target other files.
+
+`max_regions`  How many related regions are sent as extra editable context
+               alongside the excerpt.
 
 `filetypes`    Table of filetype = boolean. Unlisted filetypes are enabled.
 
