@@ -257,7 +257,12 @@ local function request_prediction(kind)
       inflight = nil
       if err then
         report_error(err)
-      elseif result and fits_multiline(result) and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_current_buf() == buf then
+      elseif
+        result
+        and fits_multiline(result)
+        and vim.api.nvim_buf_is_valid(buf)
+        and vim.api.nvim_get_current_buf() == buf
+      then
         report_ok()
         ui.show(buf, result, vim.b[buf].changedtick)
       else
@@ -344,9 +349,13 @@ end
 
 local function schedule_prediction(kind)
   timer:stop()
-  timer:start(opts.debounce_ms, 0, vim.schedule_wrap(function()
-    request_prediction(kind)
-  end))
+  timer:start(
+    opts.debounce_ms,
+    0,
+    vim.schedule_wrap(function()
+      request_prediction(kind)
+    end)
+  )
 end
 
 --- Runtime pause: config and the server stay as they are, requests stop and
@@ -569,7 +578,10 @@ function M.setup(user_opts)
   vim.api.nvim_create_user_command("NextEditToggle", M.toggle, { desc = "Enable or disable predictions" })
   vim.api.nvim_create_user_command("NextEditRestart", function()
     if opts.provider == "copilot-nes" then
-      vim.notify("nextedit: copilot-nes uses the Copilot LSP client; restart that instead (:LspRestart)", vim.log.levels.INFO)
+      vim.notify(
+        "nextedit: copilot-nes uses the Copilot LSP client; restart that instead (:LspRestart)",
+        vim.log.levels.INFO
+      )
       return
     end
     server.stop()

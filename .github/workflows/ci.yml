@@ -9,19 +9,36 @@ jobs:
   lua:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: rhysd/action-setup-vim@v1
         with:
           neovim: true
           version: stable
       - run: nvim --headless -l tests/run.lua
 
+  lua-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: latest
+          args: --check lua tests
+      - uses: lunarmodules/luacheck@v1
+        with:
+          args: lua tests
+
   rust:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: server
+      - run: cargo fmt --check --manifest-path server/Cargo.toml
+      - run: cargo clippy --all-targets --manifest-path server/Cargo.toml -- -D warnings
       - run: cargo test --manifest-path server/Cargo.toml
