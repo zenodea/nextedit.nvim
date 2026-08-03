@@ -67,9 +67,10 @@ For Copilot's native next-edit model, no Rust build is needed: >lua
 
 Predictions are requested at edit boundaries: leaving insert mode, or a
 normal-mode change. With fast providers (mercury, ollama, zeta) they are also
-requested as you type; see the `trigger` option. Cursor movement and idling
-(after 'updatetime') also trigger a request when there is recent-edit or
-diagnostic signal to act on; unchanged contexts are never re-requested.
+requested as you type; see the `trigger` option. Cursor movement, idling
+(after 'updatetime') and newly published LSP diagnostics also trigger a
+request when there is recent-edit or diagnostic signal to act on; unchanged
+contexts are never re-requested.
 
 After a short debounce a prediction may appear. Small changes render as
 word-level inline diffs; larger ones highlight the old lines and show the new
