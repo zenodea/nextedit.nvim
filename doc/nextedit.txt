@@ -93,6 +93,10 @@ menu does not cover it.
 5. COMMANDS                                                 *nextedit-commands*
 
   :NextEdit          Request a prediction now.
+  :NextEditToggle    Disable predictions until toggled back. The same is
+                     available as require("nextedit").enable(), .disable()
+                     and .toggle(). To disable a single buffer, set
+                     b:nextedit_disable to true.
   :NextEditRestart   Restart the sidecar server.
   :NextEditSignIn    GitHub device-code sign-in (`copilot-nes` only).
   :checkhealth nextedit
@@ -214,6 +218,7 @@ for details on each.
 `require("nextedit").status()` returns a table: >lua
   {
     provider = "mercury",   -- resolved provider name
+    enabled = true,         -- false while toggled off (|:NextEditToggle|)
     inflight = false,       -- request currently running
     last_error = nil,       -- last request error, nil when healthy
   }

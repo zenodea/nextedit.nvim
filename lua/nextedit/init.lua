@@ -50,6 +50,7 @@ local last_fingerprint = nil -- context of the last dispatched request
 local INFLIGHT_TIMEOUT_MS = 10000
 local last_error = nil
 local error_notified = false
+local paused = false -- :NextEditToggle / M.disable(); config survives, requests stop
 
 --- Warn once per failure streak: with typing-triggered providers an outage
 --- would otherwise notify on every pause.
@@ -160,11 +161,15 @@ local function remap_and_show(buf, params, targets, result)
   }, vim.b[buf].changedtick)
 end
 
---- Whether predictions should run in this buffer at all: real file buffers
---- only, minus disabled filetypes, denied paths (secrets should never reach
---- an API) and oversized files.
+--- Whether predictions should run in this buffer at all: not paused, not
+--- disabled buffer-locally (b:nextedit_disable), real file buffers only,
+--- minus disabled filetypes, denied paths (secrets should never reach an
+--- API) and oversized files.
 local function enabled(buf)
-  if not vim.api.nvim_buf_is_valid(buf) or vim.bo[buf].buftype ~= "" then
+  if paused or not vim.api.nvim_buf_is_valid(buf) or vim.b[buf].nextedit_disable then
+    return false
+  end
+  if vim.bo[buf].buftype ~= "" then
     return false
   end
   if opts.filetypes[vim.bo[buf].filetype] == false then
@@ -344,6 +349,33 @@ local function schedule_prediction(kind)
   end))
 end
 
+--- Runtime pause: config and the server stay as they are, requests stop and
+--- any pending prediction is cleared. Per-buffer, set b:nextedit_disable
+--- instead.
+function M.disable()
+  if not paused then
+    paused = true
+    timer:stop()
+    ui.dismiss()
+    vim.notify("nextedit: predictions disabled")
+  end
+end
+
+function M.enable()
+  if paused then
+    paused = false
+    vim.notify("nextedit: predictions enabled")
+  end
+end
+
+function M.toggle()
+  if paused then
+    M.enable()
+  else
+    M.disable()
+  end
+end
+
 --- Introspection for :checkhealth; nil until setup() has run.
 function M.current_opts()
   return opts
@@ -354,6 +386,7 @@ end
 function M.status()
   return {
     provider = (opts and opts.provider) or vim.env.NEXTEDIT_PROVIDER or "anthropic",
+    enabled = not paused,
     inflight = inflight ~= nil,
     last_error = last_error,
   }
@@ -533,6 +566,7 @@ function M.setup(user_opts)
   vim.api.nvim_create_user_command("NextEdit", function()
     request_prediction("manual")
   end, { desc = "Request a prediction now" })
+  vim.api.nvim_create_user_command("NextEditToggle", M.toggle, { desc = "Enable or disable predictions" })
   vim.api.nvim_create_user_command("NextEditRestart", function()
     if opts.provider == "copilot-nes" then
       vim.notify("nextedit: copilot-nes uses the Copilot LSP client; restart that instead (:LspRestart)", vim.log.levels.INFO)
