@@ -1,7 +1,7 @@
 local M = {}
 
 local KEY_VARS = {
-	anthropic = "ANTHROPIC_API_KE",
+	anthropic = "ANTHROPIC_API_KEY",
 	openai = "OPENAI_API_KEY",
 	mercury = "INCEPTION_API_KEY",
 	gemini = "GEMINI_API_KEY",
