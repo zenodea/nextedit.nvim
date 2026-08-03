@@ -186,9 +186,10 @@ local function excerpt_diagnostics(buf, first, last)
   return out
 end
 
---- kind: nil for edit-triggered requests, "movement" for cursor-move/idle
---- ones (which need existing signal and never replace a visible prediction),
---- "manual" for :NextEdit (which skips the duplicate-context check).
+--- kind: nil for edit-triggered requests, "movement" for cursor-move, idle
+--- and diagnostics-change ones (which need existing signal and never replace
+--- a visible prediction), "manual" for :NextEdit (which skips the
+--- duplicate-context check).
 local function request_prediction(kind)
   local buf = vim.api.nvim_get_current_buf()
   if not enabled(buf) then
@@ -422,6 +423,23 @@ function M.setup(user_opts)
     group = group,
     callback = function(ev)
       if enabled(ev.buf) and not ui.visible() then
+        schedule_prediction("movement")
+      end
+    end,
+  })
+  -- LSP diagnostics land asynchronously, usually after the edit-triggered
+  -- request already went out without them; ask again once they arrive so the
+  -- model sees the errors and can propose the fix. The fingerprint includes
+  -- diagnostics, so a publish that changed nothing costs no round trip.
+  vim.api.nvim_create_autocmd("DiagnosticChanged", {
+    group = group,
+    callback = function(ev)
+      if
+        ev.buf == vim.api.nvim_get_current_buf()
+        and enabled(ev.buf)
+        and not ui.visible()
+        and vim.api.nvim_get_mode().mode:find("^n")
+      then
         schedule_prediction("movement")
       end
     end,
