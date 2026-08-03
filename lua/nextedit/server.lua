@@ -44,7 +44,10 @@ function M.start(cmd, env)
         vim.notify("nextedit: " .. msg, vim.log.levels.WARN)
       end
     end,
-    on_exit = function(_, code)
+    on_exit = function(exited, code)
+      if exited ~= job then
+        return -- a previous server's exit racing a restart; the state belongs to the new one
+      end
       job = nil
       pending = {}
       if code ~= 0 and vim.v.exiting == vim.NIL then
