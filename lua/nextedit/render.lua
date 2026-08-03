@@ -48,15 +48,13 @@ local function inline_marks(row, old_line, new_line)
   for _, h in ipairs(hunks) do
     local ai, ac, bi, bc = h[1], h[2], h[3], h[4]
     if ac > 0 then
-      marks[#marks + 1] =
-        { row, col[ai], { end_col = end_col[ai + ac - 1], hl_group = "NextEditOld" } }
+      marks[#marks + 1] = { row, col[ai], { end_col = end_col[ai + ac - 1], hl_group = "NextEditOld" } }
     end
     if bc > 0 then
       local text = table.concat(b, "", bi, bi + bc - 1)
       inserted = inserted + #text
       local at = ac > 0 and end_col[ai + ac - 1] or (ai == 0 and 0 or end_col[ai])
-      marks[#marks + 1] =
-        { row, at, { virt_text = { { text, "NextEditNew" } }, virt_text_pos = "inline" } }
+      marks[#marks + 1] = { row, at, { virt_text = { { text, "NextEditNew" } }, virt_text_pos = "inline" } }
     end
   end
   if inserted / #new_line > INLINE_MAX_INSERT_RATIO then

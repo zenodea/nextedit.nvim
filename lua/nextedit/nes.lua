@@ -166,8 +166,7 @@ end
 
 --- Byte column on `line` for an LSP character offset in the client's encoding.
 local function byte_col(client, line, character)
-  local ok, col =
-    pcall(vim.str_byteindex, line, client.offset_encoding or "utf-16", character, false)
+  local ok, col = pcall(vim.str_byteindex, line, client.offset_encoding or "utf-16", character, false)
   return ok and col or #line
 end
 

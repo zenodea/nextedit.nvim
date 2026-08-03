@@ -153,8 +153,9 @@ pub(crate) fn examples() -> &'static [(String, String)] {
 /// supported fields: reasoning-model endpoints reject max_tokens and
 /// non-default temperature.
 pub(crate) fn chat_body(model: &str, p: &PredictParams) -> serde_json::Value {
-    let mut messages =
-        vec![json!({ "role": "system", "content": format!("{SYSTEM_PROMPT}{FORMAT_INSTRUCTIONS}") })];
+    let mut messages = vec![
+        json!({ "role": "system", "content": format!("{SYSTEM_PROMPT}{FORMAT_INSTRUCTIONS}") }),
+    ];
     for (user, assistant) in examples() {
         messages.push(json!({ "role": "user", "content": user }));
         messages.push(json!({ "role": "assistant", "content": assistant }));
@@ -308,6 +309,45 @@ pub(crate) fn parse_model_edit(text: &str) -> Result<ModelEdit> {
     bail!("model output contained no JSON object")
 }
 
+/// Clamp the model's edit to lines it was actually shown — the excerpt or one
+/// extra region — and drop no-ops.
+pub(crate) fn validate(edit: ModelEdit, p: &PredictParams) -> Prediction {
+    if !edit.has_edit || edit.start_line > edit.end_line {
+        return Prediction::none();
+    }
+    // The region (excerpt or extra) that fully contains the edit, in the
+    // file the edit names (models sometimes echo the current path; treat
+    // that as "no path").
+    let edit_path = edit.path.as_deref().filter(|path| *path != p.path);
+    let mut regions = std::iter::once((p.path.as_str(), p.excerpt_start, &p.excerpt_lines))
+        .chain(p.extra_regions.iter().map(|r| (r.path.as_str(), r.start, &r.lines)));
+    let Some((path, start, lines)) = regions.find(|(path, start, lines)| {
+        *path == edit_path.unwrap_or(&p.path)
+            && edit.start_line >= *start
+            && edit.end_line <= start + lines.len().saturating_sub(1)
+    }) else {
+        return Prediction::none();
+    };
+    // Models occasionally echo the cursor marker back; it is never buffer text.
+    let replacement = edit.replacement.replace(CURSOR_MARKER, "");
+    let replacement: Vec<String> = if replacement.is_empty() {
+        vec![]
+    } else {
+        replacement.split('\n').map(str::to_string).collect()
+    };
+    let current = &lines[edit.start_line - start..=edit.end_line - start];
+    if current == replacement.as_slice() {
+        return Prediction::none();
+    }
+    Prediction {
+        has_edit: true,
+        start_line: edit.start_line,
+        end_line: edit.end_line,
+        replacement,
+        path: (path != p.path).then(|| path.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,47 +406,5 @@ mod tests {
         assert!(ex[0].0.contains(CURSOR_MARKER));
         assert!(ex[0].0.contains("Diagnostics in the excerpt:"));
         assert!(ex[1].1.contains("\"has_edit\": false"));
-    }
-}
-
-/// Clamp the model's edit to lines it was actually shown — the excerpt or one
-/// extra region — and drop no-ops.
-pub(crate) fn validate(edit: ModelEdit, p: &PredictParams) -> Prediction {
-    if !edit.has_edit || edit.start_line > edit.end_line {
-        return Prediction::none();
-    }
-    // The region (excerpt or extra) that fully contains the edit, in the
-    // file the edit names (models sometimes echo the current path; treat
-    // that as "no path").
-    let edit_path = edit.path.as_deref().filter(|path| *path != p.path);
-    let regions = std::iter::once((p.path.as_str(), p.excerpt_start, &p.excerpt_lines))
-        .chain(p.extra_regions.iter().map(|r| (r.path.as_str(), r.start, &r.lines)));
-    let Some((path, start, lines)) = regions
-        .filter(|(path, start, lines)| {
-            *path == edit_path.unwrap_or(&p.path)
-                && edit.start_line >= *start
-                && edit.end_line <= start + lines.len().saturating_sub(1)
-        })
-        .next()
-    else {
-        return Prediction::none();
-    };
-    // Models occasionally echo the cursor marker back; it is never buffer text.
-    let replacement = edit.replacement.replace(CURSOR_MARKER, "");
-    let replacement: Vec<String> = if replacement.is_empty() {
-        vec![]
-    } else {
-        replacement.split('\n').map(str::to_string).collect()
-    };
-    let current = &lines[edit.start_line - start..=edit.end_line - start];
-    if current == replacement.as_slice() {
-        return Prediction::none();
-    }
-    Prediction {
-        has_edit: true,
-        start_line: edit.start_line,
-        end_line: edit.end_line,
-        replacement,
-        path: (path != p.path).then(|| path.to_string()),
     }
 }

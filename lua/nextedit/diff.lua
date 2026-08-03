@@ -14,72 +14,72 @@ local MERGE_WINDOW_MS = 10000 -- and so do commits after this long a pause
 local state = {} -- buf -> { baseline, history = { {base, path, diff, region = {first, last}, at}, ... } }
 
 local function buffer_text(buf)
-	return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n") .. "\n"
+  return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n") .. "\n"
 end
 
 local function buffer_path(buf)
-	return vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ":.")
+  return vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ":.")
 end
 
 local function ensure(buf)
-	local s = state[buf]
-	if not s then
-		s = { baseline = buffer_text(buf), history = {} }
-		state[buf] = s
-	end
-	return s
+  local s = state[buf]
+  if not s then
+    s = { baseline = buffer_text(buf), history = {} }
+    state[buf] = s
+  end
+  return s
 end
 
 --- The changed line range in `after` coordinates, as {first, last}, or nil
 --- when the texts are equal.
 local function changed_region(before, after)
-	local hunks = vim.diff(before, after, { result_type = "indices" })
-	if not hunks or #hunks == 0 then
-		return nil
-	end
-	local first, last = math.huge, 0
-	for _, h in ipairs(hunks) do
-		local start_b, count_b = h[3], h[4]
-		first = math.min(first, start_b)
-		last = math.max(last, start_b + math.max(count_b, 1) - 1)
-	end
-	return { first, last }
+  local hunks = vim.diff(before, after, { result_type = "indices" })
+  if not hunks or #hunks == 0 then
+    return nil
+  end
+  local first, last = math.huge, 0
+  for _, h in ipairs(hunks) do
+    local start_b, count_b = h[3], h[4]
+    first = math.min(first, start_b)
+    last = math.max(last, start_b + math.max(count_b, 1) - 1)
+  end
+  return { first, last }
 end
 
 --- Record the edit made since the last commit, merging it into the previous
 --- history entry when it continues the same edit (nearby and recent).
 function M.commit(buf)
-	local s = ensure(buf)
-	local text = buffer_text(buf)
-	if text == s.baseline then
-		return
-	end
-	local now = vim.uv.now()
-	local region = changed_region(s.baseline, text)
-	local last = s.history[#s.history]
-	-- `last.region` is in the coordinates of the text it produced, which is
-	-- exactly `s.baseline`, so it is directly comparable to `region`.
-	local continues = last
-		and now - last.at < MERGE_WINDOW_MS
-		and region[1] <= last.region[2] + REGION_GAP
-		and region[2] >= last.region[1] - REGION_GAP
-	if continues then
-		last.diff = vim.diff(last.base, text, { ctxlen = 2 })
-		last.region = changed_region(last.base, text) or region
-		last.at = now
-	else
-		table.insert(s.history, {
-			base = s.baseline,
-			path = buffer_path(buf),
-			diff = vim.diff(s.baseline, text, { ctxlen = 2 }),
-			region = region,
-			at = now,
-		})
-		if #s.history > MAX_EDITS then
-			table.remove(s.history, 1)
-		end
-	end
-	s.baseline = text
+  local s = ensure(buf)
+  local text = buffer_text(buf)
+  if text == s.baseline then
+    return
+  end
+  local now = vim.uv.now()
+  local region = changed_region(s.baseline, text)
+  local last = s.history[#s.history]
+  -- `last.region` is in the coordinates of the text it produced, which is
+  -- exactly `s.baseline`, so it is directly comparable to `region`.
+  local continues = last
+    and now - last.at < MERGE_WINDOW_MS
+    and region[1] <= last.region[2] + REGION_GAP
+    and region[2] >= last.region[1] - REGION_GAP
+  if continues then
+    last.diff = vim.diff(last.base, text, { ctxlen = 2 })
+    last.region = changed_region(last.base, text) or region
+    last.at = now
+  else
+    table.insert(s.history, {
+      base = s.baseline,
+      path = buffer_path(buf),
+      diff = vim.diff(s.baseline, text, { ctxlen = 2 }),
+      region = region,
+      at = now,
+    })
+    if #s.history > MAX_EDITS then
+      table.remove(s.history, 1)
+    end
+  end
+  s.baseline = text
 end
 
 --- The recent-edit history as { path, diff } entries, oldest first, plus the
@@ -87,32 +87,32 @@ end
 --- spans *all* buffers — a rename in one file is exactly the context needed
 --- to fix its call sites in another — capped to the most recent MAX_EDITS.
 function M.take(buf)
-	local entries = {}
-	for _, s in pairs(state) do
-		for _, entry in ipairs(s.history) do
-			entries[#entries + 1] = entry
-		end
-	end
-	table.sort(entries, function(a, b)
-		return a.at < b.at
-	end)
-	local edits = {}
-	for i = math.max(1, #entries - MAX_EDITS + 1), #entries do
-		edits[#edits + 1] = { path = entries[i].path, diff = entries[i].diff }
-	end
-	local s = ensure(buf)
-	local text = buffer_text(buf)
-	if text ~= s.baseline then
-		local pending = vim.diff(s.baseline, text, { ctxlen = 2 })
-		if pending and pending ~= "" then
-			edits[#edits + 1] = { path = buffer_path(buf), diff = pending }
-		end
-	end
-	return edits
+  local entries = {}
+  for _, s in pairs(state) do
+    for _, entry in ipairs(s.history) do
+      entries[#entries + 1] = entry
+    end
+  end
+  table.sort(entries, function(a, b)
+    return a.at < b.at
+  end)
+  local edits = {}
+  for i = math.max(1, #entries - MAX_EDITS + 1), #entries do
+    edits[#edits + 1] = { path = entries[i].path, diff = entries[i].diff }
+  end
+  local s = ensure(buf)
+  local text = buffer_text(buf)
+  if text ~= s.baseline then
+    local pending = vim.diff(s.baseline, text, { ctxlen = 2 })
+    if pending and pending ~= "" then
+      edits[#edits + 1] = { path = buffer_path(buf), diff = pending }
+    end
+  end
+  return edits
 end
 
 function M.forget(buf)
-	state[buf] = nil
+  state[buf] = nil
 end
 
 return M

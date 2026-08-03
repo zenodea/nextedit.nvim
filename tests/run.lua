@@ -24,14 +24,28 @@ check("remap: insert 2 lines above", { track.remap(4, 5, { { first = 0, last = 0
 check("remap: delete a line above", { track.remap(4, 5, { { first = 0, last = 1, new_last = 0 } }) }, { 3, 4 })
 check("remap: edit below is ignored", { track.remap(4, 5, { { first = 5, last = 6, new_last = 6 } }) }, { 4, 5 })
 check("remap: edit inside drops it", { track.remap(4, 5, { { first = 3, last = 4, new_last = 4 } }) }, {})
-check("remap: insert at region end is below", { track.remap(4, 5, { { first = 5, last = 5, new_last = 6 } }) }, { 4, 5 })
+check(
+  "remap: insert at region end is below",
+  { track.remap(4, 5, { { first = 5, last = 5, new_last = 6 } }) },
+  { 4, 5 }
+)
 
 -- Edit-history coalescing: nearby commits merge, distant ones start entries.
 local diffmod = require("nextedit.diff")
 local dbuf = vim.api.nvim_create_buf(false, true)
 vim.api.nvim_buf_set_lines(dbuf, 0, -1, false, {
-  "one", "two", "three", "four", "five", "six",
-  "seven", "eight", "nine", "ten", "eleven", "twelve",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+  "eleven",
+  "twelve",
 })
 check("history: starts empty", diffmod.take(dbuf), {})
 vim.api.nvim_buf_set_lines(dbuf, 0, 1, false, { "ONE" })
@@ -40,8 +54,11 @@ diffmod.commit(dbuf)
 vim.api.nvim_buf_set_lines(dbuf, 1, 2, false, { "TWO" })
 diffmod.commit(dbuf)
 check("history: nearby commits merge into one entry", #diffmod.take(dbuf), 1)
-check("history: merged entry spans both changes", diffmod.take(dbuf)[1].diff:match("ONE") ~= nil
-  and diffmod.take(dbuf)[1].diff:match("TWO") ~= nil, true)
+check(
+  "history: merged entry spans both changes",
+  diffmod.take(dbuf)[1].diff:match("ONE") ~= nil and diffmod.take(dbuf)[1].diff:match("TWO") ~= nil,
+  true
+)
 vim.api.nvim_buf_set_lines(dbuf, 11, 12, false, { "TWELVE" })
 diffmod.commit(dbuf)
 check("history: distant commit starts a new entry", #diffmod.take(dbuf), 2)
@@ -51,13 +68,16 @@ diffmod.forget(dbuf)
 local outline = require("nextedit.outline")
 local obuf = vim.api.nvim_create_buf(false, true)
 vim.api.nvim_buf_set_lines(obuf, 0, -1, false, {
-  "local function foo()", "end", "", "local function bar()", "end",
+  "local function foo()",
+  "end",
+  "",
+  "local function bar()",
+  "end",
 })
 vim.bo[obuf].filetype = "lua"
 local o = outline.get(obuf)
 check("outline: finds both functions", #o, 2)
-check("outline: entries carry absolute line numbers",
-  o[2]:match("^%s*4|") ~= nil and o[2]:match("bar") ~= nil, true)
+check("outline: entries carry absolute line numbers", o[2]:match("^%s*4|") ~= nil and o[2]:match("bar") ~= nil, true)
 
 -- Regions: occurrences of identifiers the recent edits removed become extra
 -- editable regions outside the excerpt.
@@ -77,20 +97,28 @@ vim.api.nvim_buf_set_name(xbuf, "xtest.py")
 vim.api.nvim_buf_set_lines(xbuf, 0, -1, false, { "print(get_user(2))" })
 local found2 = regionsmod.find(rbuf, redit, 1, 4)
 check("regions: finds sites in other listed buffers", #found2, 2)
-check("regions: cross-buffer region carries its own path and bufnr",
-  found2[2].path:match("xtest%.py$") ~= nil and found2[2].bufnr == xbuf, true)
+check(
+  "regions: cross-buffer region carries its own path and bufnr",
+  found2[2].path:match("xtest%.py$") ~= nil and found2[2].bufnr == xbuf,
+  true
+)
 vim.api.nvim_buf_delete(xbuf, { force = true })
-check("regions: region covers the occurrence", found[1].start <= 13
-  and found[1].start + #found[1].lines - 1 >= 13, true)
-check("regions: nothing without stale tokens",
-  #regionsmod.find(rbuf, { { path = "f.py", diff = "@@ -1 +1 @@\n-x\n+y" } }, 1, 4), 0)
+check(
+  "regions: region covers the occurrence",
+  found[1].start <= 13 and found[1].start + #found[1].lines - 1 >= 13,
+  true
+)
+check(
+  "regions: nothing without stale tokens",
+  #regionsmod.find(rbuf, { { path = "f.py", diff = "@@ -1 +1 @@\n-x\n+y" } }, 1, 4),
+  0
+)
 
 -- Rendering: small word changes are inline, rewrites fall back to block style.
 local render = require("nextedit.render")
 local inline = render.extmarks({ "local foo = 1" }, { "local bar = 1" }, 10)
 check("render: word change makes two inline marks", #inline, 2)
-check("render: deletion span covers the old word",
-  { inline[1][1], inline[1][2], inline[1][3].end_col }, { 10, 6, 9 })
+check("render: deletion span covers the old word", { inline[1][1], inline[1][2], inline[1][3].end_col }, { 10, 6, 9 })
 check("render: insertion is inline virtual text", inline[2][3].virt_text[1][1], "bar")
 local block = render.extmarks({ "x" }, { "something totally different" }, 0)
 check("render: rewrite falls back to line highlight", block[1][3].line_hl_group, "NextEditOld")
@@ -98,8 +126,11 @@ check("render: rewrite shows the new line below", block[2][3].virt_lines[1][1][1
 local grow = render.extmarks({ "a", "b" }, { "a", "b", "c" }, 0)
 check("render: pure insertion renders as virtual lines", grow[1][3].virt_lines[1][1][1], "c")
 local flipped = render.extmarks({ "x" }, { "something totally different" }, 3, true)
-check("render: above-placement anchors the preview over the change",
-  { flipped[2][1], flipped[2][3].virt_lines_above }, { 3, true })
+check(
+  "render: above-placement anchors the preview over the change",
+  { flipped[2][1], flipped[2][3].virt_lines_above },
+  { 3, true }
+)
 
 local SAMPLE = {
   "def add(a: int, b: int) -> int:",
@@ -185,8 +216,7 @@ reset_buffer()
 local origin = vim.api.nvim_get_current_buf()
 local other = vim.api.nvim_create_buf(true, false)
 vim.api.nvim_buf_set_lines(other, 0, -1, false, { "alpha", "beta", "gamma" })
-ui.show(other, { start_line = 2, end_line = 2, replacement = { "BETA" }, hint_buf = origin },
-  vim.b[other].changedtick)
+ui.show(other, { start_line = 2, end_line = 2, replacement = { "BETA" }, hint_buf = origin }, vim.b[other].changedtick)
 check("crossbuf: prediction visible", ui.visible(), true)
 check("crossbuf: first accept switches to the buffer", ui.accept(), true)
 check("crossbuf: prediction survives the switch", ui.visible(), true)

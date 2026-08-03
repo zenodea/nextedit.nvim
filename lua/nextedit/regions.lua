@@ -20,8 +20,12 @@ local MAX_RECENT = 3 -- only mine the newest edits; old ones are stale signal
 
 -- Words that appear in diffs constantly without identifying anything.
 local STOPWORDS = {}
-for word in ("return local function const import from self this true false nil none null "
-  .. "end then else elseif public private static void int string bool let var pub use def class"):gmatch("%S+") do
+for word in
+  (
+    "return local function const import from self this true false nil none null "
+    .. "end then else elseif public private static void int string bool let var pub use def class"
+  ):gmatch("%S+")
+do
   STOPWORDS[word] = true
 end
 
