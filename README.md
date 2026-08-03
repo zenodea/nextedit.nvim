@@ -43,7 +43,9 @@ Also documented as vim help: `:h nextedit`.
 ## Requirements
 
 - Neovim 0.10+
-- A Rust toolchain to build the sidecar (not needed for `copilot-nes`)
+- The sidecar binary: either a Rust toolchain to build it, or a prebuilt
+  `nextedit-server` from the [releases page](../../releases) unpacked into
+  `server/target/release/` (not needed for `copilot-nes`)
 - Credentials for your provider, or a local model server
 - For `copilot-nes`: the `copilot-language-server` binary. The easiest way
   to get it is adding `zbirenbaum/copilot.lua` as a plugin dependency; its
