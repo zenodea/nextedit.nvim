@@ -14,6 +14,13 @@ local TYPING_PROVIDERS = { mercury = true, ollama = true, zeta = true, zeta2 = t
 
 local defaults = {
   trigger = nil, -- "boundary" | "typing"; defaults to "typing" for mercury/ollama/zeta, "boundary" otherwise
+  triggers = { -- what requests a prediction, besides edits themselves
+    movement = true, -- cursor movement
+    idle = true, -- idling for 'updatetime' (CursorHold)
+    diagnostics = true, -- newly published LSP diagnostics
+    signal_required = true, -- movement/idle only ask when there are recent edits or diagnostics to reason from
+  },
+  multiline = true, -- false shows only single-line predictions
   debounce_ms = 150,
   context_lines = 40, -- buffer context sent above and below the cursor
   accept_key = "<Tab>",
@@ -186,6 +193,12 @@ local function excerpt_diagnostics(buf, first, last)
   return out
 end
 
+--- With multiline off, a prediction must keep to one line: a single line
+--- replaced by at most a single line.
+local function fits_multiline(result)
+  return opts.multiline or (result.end_line == result.start_line and #result.replacement <= 1)
+end
+
 --- kind: nil for edit-triggered requests, "movement" for cursor-move, idle
 --- and diagnostics-change ones (which need existing signal and never replace
 --- a visible prediction), "manual" for :NextEdit (which skips the
@@ -202,9 +215,12 @@ local function request_prediction(kind)
   local recent_edits = diff.take(buf)
   local diagnostics = excerpt_diagnostics(buf, first, last)
   -- Movement gives the model nothing new by itself: only ask when there is
-  -- recent-edit or diagnostic signal to reason from, and never while a
-  -- prediction is already on screen.
-  if kind == "movement" and (ui.visible() or (#recent_edits == 0 and #diagnostics == 0)) then
+  -- recent-edit or diagnostic signal to reason from (unless the user turned
+  -- signal_required off), and never while a prediction is already on screen.
+  if
+    kind == "movement"
+    and (ui.visible() or (opts.triggers.signal_required and #recent_edits == 0 and #diagnostics == 0))
+  then
     return
   end
   -- One request at a time: let the in-flight one finish (its response can be
@@ -228,7 +244,7 @@ local function request_prediction(kind)
       inflight = nil
       if err then
         report_error(err)
-      elseif result and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_current_buf() == buf then
+      elseif result and fits_multiline(result) and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_current_buf() == buf then
         report_ok()
         ui.show(buf, result, vim.b[buf].changedtick)
       else
@@ -285,7 +301,7 @@ local function request_prediction(kind)
       if err then
         track.finish(buf)
         report_error(err)
-      elseif result and result.has_edit then
+      elseif result and result.has_edit and fits_multiline(result) then
         report_ok()
         remap_and_show(buf, params, targets, result)
       else
@@ -418,32 +434,45 @@ function M.setup(user_opts)
   end
   -- Movement and idle also trigger, so suggestions appear where you look,
   -- not only where you type. request_prediction gates these on existing
-  -- signal, and the fingerprint check keeps repeat contexts free.
-  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorHold" }, {
-    group = group,
-    callback = function(ev)
-      if enabled(ev.buf) and not ui.visible() then
-        schedule_prediction("movement")
-      end
-    end,
-  })
+  -- signal, and the fingerprint check keeps repeat contexts free. Each
+  -- trigger has its own switch in opts.triggers.
+  local move_events = {}
+  if opts.triggers.movement then
+    move_events[#move_events + 1] = "CursorMoved"
+  end
+  if opts.triggers.idle then
+    move_events[#move_events + 1] = "CursorHold"
+  end
+  if #move_events > 0 then
+    vim.api.nvim_create_autocmd(move_events, {
+      group = group,
+      callback = function(ev)
+        if enabled(ev.buf) and not ui.visible() then
+          schedule_prediction("movement")
+        end
+      end,
+    })
+  end
   -- LSP diagnostics land asynchronously, usually after the edit-triggered
-  -- request already went out without them; ask again once they arrive so the
-  -- model sees the errors and can propose the fix. The fingerprint includes
-  -- diagnostics, so a publish that changed nothing costs no round trip.
-  vim.api.nvim_create_autocmd("DiagnosticChanged", {
-    group = group,
-    callback = function(ev)
-      if
-        ev.buf == vim.api.nvim_get_current_buf()
-        and enabled(ev.buf)
-        and not ui.visible()
-        and vim.api.nvim_get_mode().mode:find("^n")
-      then
-        schedule_prediction("movement")
-      end
-    end,
-  })
+  -- request already went out without them; ask again once they arrive so
+  -- the model sees the errors and can propose the fix. The fingerprint
+  -- includes diagnostics, so a publish that changed nothing costs no
+  -- round trip.
+  if opts.triggers.diagnostics then
+    vim.api.nvim_create_autocmd("DiagnosticChanged", {
+      group = group,
+      callback = function(ev)
+        if
+          ev.buf == vim.api.nvim_get_current_buf()
+          and enabled(ev.buf)
+          and not ui.visible()
+          and vim.api.nvim_get_mode().mode:find("^n")
+        then
+          schedule_prediction("movement")
+        end
+      end,
+    })
+  end
   local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
   vim.on_key(function(_, typed)
     if typed == esc and ui.visible() and vim.api.nvim_get_mode().mode == "n" then
