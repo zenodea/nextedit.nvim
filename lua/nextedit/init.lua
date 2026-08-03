@@ -30,6 +30,8 @@ local defaults = {
   max_regions = 4, -- related regions sent as extra editable context
   accept_key = "<Tab>",
   dismiss_key = "<C-]>",
+  jump_distance = 5, -- accepts farther than this from the cursor jump first, then apply
+  sign_text = "»", -- gutter sign marking a pending prediction; "" disables it
   server_cmd = nil, -- defaults to the bundled Rust binary
   filetypes = { gitcommit = false, gitrebase = false, help = false }, -- per-filetype toggle; unlisted filetypes are enabled
   deny_paths = { "%.env", "%.pem$", "secret", "credential" }, -- never predict in files matching these Lua patterns
@@ -370,6 +372,7 @@ function M.setup(user_opts)
   end
 
   regions.configure({ max_regions = opts.max_regions })
+  ui.configure({ jump_distance = opts.jump_distance, sign_text = opts.sign_text })
 
   vim.api.nvim_set_hl(0, "NextEditOld", { default = true, link = "DiffDelete" })
   vim.api.nvim_set_hl(0, "NextEditNew", { default = true, link = "DiffAdd" })

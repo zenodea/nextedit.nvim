@@ -184,6 +184,9 @@ require("nextedit").setup({
   max_regions = 4,       -- related regions sent as extra editable context
   accept_key = "<Tab>",
   dismiss_key = "<C-]>",
+  jump_distance = 5,     -- accepts farther than this many lines from the
+                         -- cursor jump there first; a second accept applies
+  sign_text = "»",       -- gutter sign marking a prediction; "" disables it
   server_cmd = nil,      -- override the sidecar binary
   provider = nil,        -- see the table above; default "anthropic"
   model = nil,           -- provider-specific model name
