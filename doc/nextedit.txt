@@ -104,6 +104,13 @@ menu does not cover it.
 Defaults: >lua
   require("nextedit").setup({
     trigger = nil,       -- "boundary" or "typing"; defaults per provider
+    triggers = {         -- what requests a prediction, besides edits
+      movement = true,     -- cursor movement
+      idle = true,         -- idling for 'updatetime' (CursorHold)
+      diagnostics = true,  -- newly published LSP diagnostics
+      signal_required = true,  -- movement/idle need signal to act on
+    },
+    multiline = true,    -- false shows only single-line predictions
     debounce_ms = 150,   -- pause before a request is sent
     context_lines = 40,  -- buffer lines sent above and below the cursor
     accept_key = "<Tab>",
@@ -122,6 +129,19 @@ Defaults: >lua
                change text in normal mode. "typing" also requests them as you
                type. Defaults to "typing" for mercury, ollama and zeta, and
                "boundary" for everything else.
+
+`triggers`     Per-trigger switches for everything that requests a
+               prediction besides edits themselves. `movement` (cursor
+               movement), `idle` ('updatetime' elapsing) and `diagnostics`
+               (newly published LSP diagnostics) can each be disabled;
+               with all three off, predictions come from edits alone.
+               `signal_required` (default true) makes movement and idle ask
+               only when there are recent edits or diagnostics to reason
+               from; set it to false to let them ask anywhere. Unchanged
+               contexts are never re-requested either way.
+
+`multiline`    When false, predictions that replace more than one line, or
+               whose replacement spans more than one line, are dropped.
 
 `filetypes`    Table of filetype = boolean. Unlisted filetypes are enabled.
 

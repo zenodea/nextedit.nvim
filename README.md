@@ -163,6 +163,16 @@ require("nextedit").setup({
   trigger = nil,         -- "boundary" (predict at edit boundaries) or "typing"
                          -- (also predict as you type); defaults to "typing" for
                          -- mercury/ollama/zeta and "boundary" for the rest
+  triggers = {           -- what requests a prediction, besides edits themselves
+    movement = true,     -- cursor movement
+    idle = true,         -- idling for 'updatetime' (CursorHold)
+    diagnostics = true,  -- newly published LSP diagnostics
+    signal_required = true,
+                         -- movement/idle only ask when there are recent edits
+                         -- or diagnostics to reason from; false lets them ask
+                         -- anywhere (unchanged contexts still never re-request)
+  },
+  multiline = true,      -- false shows only single-line predictions
   debounce_ms = 150,     -- pause before a request is sent
   context_lines = 40,    -- buffer lines sent above and below the cursor
   accept_key = "<Tab>",
