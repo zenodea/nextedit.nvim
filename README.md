@@ -97,6 +97,7 @@ shows inline or below.
 | `<C-]>` | Dismiss, and do not suggest this again until the lines change. |
 | `<Esc>` | Dismiss (normal mode). |
 | `:NextEdit` | Request a prediction now. |
+| `:NextEditToggle` | Disable predictions until toggled back; also `require("nextedit").enable()` / `.disable()`. Set `vim.b.nextedit_disable = true` to disable a single buffer. |
 | `:NextEditRestart` | Restart the sidecar. |
 | `:NextEditSignIn` | GitHub device-code sign-in (`copilot-nes` only). |
 | `:checkhealth nextedit` | Diagnose binary, server and credential problems. |
@@ -207,8 +208,8 @@ The same settings are read from the environment (Lua options win per key):
 `NEXTEDIT_API_KEY`, with provider key fallbacks such as `ANTHROPIC_API_KEY`.
 
 For statuslines, `require("nextedit").status()` returns
-`{ provider, inflight, last_error }`. Request errors are notified once per
-failure streak, then muted until a request succeeds.
+`{ provider, enabled, inflight, last_error }`. Request errors are notified
+once per failure streak, then muted until a request succeeds.
 
 Highlights: `NextEditOld` links to `DiffDelete`, `NextEditNew` to `DiffAdd`,
 `NextEditSign` (the `»` mark) to `DiagnosticSignInfo`.
